@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Labour Force</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+    <div class="logo">Labour <span>Force</span></div>
+    <nav class="nav">
+        <button class="active" onclick="showPage('dashboard', this)"><span class="nav-icon">📊</span>Dashboard</button>
+        <button onclick="showPage('requests', this)"><span class="nav-icon">📋</span>Labour Requests</button>
+<button onclick="showPage('deployments', this)"><span class="nav-icon">🔄</span>Deployments</button>
+<button onclick="showPage('availability', this)"><span class="nav-icon">🟢</span>Availability</button>
+<button onclick="showPage('exceptions', this)"><span class="nav-icon">🚨</span>Exceptions</button>
+        <button onclick="showPage('attendance', this)"><span class="nav-icon">📝</span>Attendance</button>
+        <button onclick="showPage('approval', this)"><span class="nav-icon">✓</span>Approval</button>
+        <button onclick="showPage('workers', this)"><span class="nav-icon">👥</span>Workers</button>
+        <button onclick="showPage('clients', this)"><span class="nav-icon">🏭</span>Clients</button>
+        <button onclick="showPage('departments', this)"><span class="nav-icon">🏢</span>Departments</button>
+        <button onclick="showPage('payroll', this)"><span class="nav-icon">💰</span>Payroll</button>
+        <button onclick="showPage('reports', this)"><span class="nav-icon">📄</span>Reports</button>
+        <button onclick="showPage('users', this)" data-permission="users.manage"><span class="nav-icon">🛡️</span>Users & Access</button>
+<button onclick="showPage('audit', this)"><span class="nav-icon">🧾</span>Audit Trail</button>
+    </nav>
+</aside>
+
+<main class="main">
+<header class="topbar"><h1 id="pageTitle">Dashboard</h1><div class="user"><div class="avatar">A</div>Administrator</div></header>
+<div class="content">
+
+<section id="dashboard" class="page active">
+    <div class="cards">
+        <div class="card"><span class="card-icon">👥</span><div class="card-label">Active Workers</div><div class="card-value" id="dashboardWorkers">0</div><div class="card-sub">Currently registered</div></div>
+        <div class="card"><span class="card-icon">📋</span><div class="card-label">Pending Requests</div><div class="card-value" id="dashboardRequests">0</div><div class="card-sub">Awaiting action</div></div>
+        <div class="card"><span class="card-icon">✓</span><div class="card-label">Worked Today</div><div class="card-value" id="dashboardWorked">0</div><div class="card-sub">Attendance recorded</div></div>
+        <div class="card"><span class="card-icon">!</span><div class="card-label">Missing</div><div class="card-value" id="dashboardMissing">0</div><div class="card-sub">Needs attention</div></div>
+    </div>
+    <div class="section">
+        <div class="section-header"><h2>Today's Attendance</h2><button class="primary" onclick="showPage('attendance')">Record Attendance</button></div>
+        <div class="table-container"><table><thead><tr><th>Worker</th><th>Department</th><th>Classification</th><th>Rate</th><th>Status</th></tr></thead><tbody id="dashboardAttendance"></tbody></table></div>
+    </div>
+    <div class="section">
+        <div class="section-header"><h2>Recent Labour Requests</h2><button class="secondary" onclick="showPage('requests')">View Requests</button></div>
+        <div class="table-container"><table><thead><tr><th>Request</th><th>Client</th><th>Department</th><th>Workers</th><th>Start</th><th>Status</th></tr></thead><tbody id="dashboardRequestsTable"></tbody></table></div>
+    </div>
+</section>
+
+<section id="requests" class="page">
+<div class="section">
+    <div class="section-header"><h2>Labour Requests</h2><div class="controls"><select id="requestStatusFilter" onchange="renderRequests()"><option value="all">All Statuses</option><option>Pending</option><option>Approved</option><option>Allocated</option><option>Completed</option><option>Cancelled</option></select><button class="primary" onclick="openRequestModal()">+ New Labour Request</button></div></div>
+    <div class="request-note">Requests are optional. Workers can still be deployed directly when no client request exists.</div>
+    <div class="table-container"><table><thead><tr><th>Request</th><th>Client</th><th>Department</th><th>Classification</th><th>Workers</th><th>Start</th><th>Duration</th><th>Status</th><th>Actions</th></tr></thead><tbody id="requestsTable"></tbody></table></div>
+</div>
+</section>
+
+<section id="attendance" class="page">
+<div class="section">
+    <div class="section-header"><h2>Daily Attendance</h2><div class="controls"><input type="date" id="attendanceDate" onchange="renderAttendance()"><select id="departmentFilter" onchange="renderAttendance()"></select><button class="secondary" onclick="markAllWorked()">✓ Mark All Worked</button></div></div>
+    <div class="attendance-toolbar"><div class="summary"><span>Worked: <strong id="workedCount">0</strong></span><span>Absent: <strong id="absentCount">0</strong></span><span>Missing: <strong id="missingCount">0</strong></span><span>OT: <strong id="overtimeCount">0</strong> hrs</span></div><button class="primary" onclick="submitAttendance()">Submit for Approval</button></div>
+    <div class="table-container"><table><thead><tr><th>Worker</th><th>Department</th><th>Classification</th><th>Daily Rate</th><th>Status</th><th>OT Hours</th><th>OT Pay</th><th>Total</th></tr></thead><tbody id="attendanceTable"></tbody></table></div>
+</div>
+</section>
+
+<section id="approval" class="page">
+<div class="section">
+    <div class="section-header"><h2>Supervisor Approval</h2><div class="controls"><input type="date" id="approvalDate" onchange="renderApproval()"><select id="approvalDepartment" onchange="renderApproval()"></select></div></div>
+    <div class="approval-banner"><div class="approval-info"><strong id="approvalTitle">Attendance Approval</strong><small id="approvalDescription">Review attendance before payroll.</small></div><button class="primary" onclick="approveAttendance()">Approve Attendance</button></div>
+    <div class="table-container"><table><thead><tr><th>Worker</th><th>Department</th><th>Status</th><th>OT Hours</th><th>Pay</th><th>Approval</th></tr></thead><tbody id="approvalTable"></tbody></table></div>
+</div>
+</section>
+
+<section id="workers" class="page">
+<div class="section">
+    <div class="section-header"><h2>Workers</h2><div class="controls"><input type="search" id="workerSearch" placeholder="Search worker..." oninput="renderWorkers()"><select id="workerDepartmentFilter" onchange="renderWorkers()"></select><button class="primary" onclick="openWorkerModal()">+ Add Worker</button></div></div>
+    <div class="table-container"><table><thead><tr><th>Employee No.</th><th>Worker</th><th>Department</th><th>Classification</th><th>Daily Rate</th><th>OT Rate</th><th>Deployment</th><th>Status</th><th>Actions</th></tr></thead><tbody id="workersTable"></tbody></table></div>
+</div>
+</section>
+
+<section id="clients" class="page">
+<div class="section">
+    <div class="section-header"><h2>Clients / Mother Companies</h2><button class="primary" onclick="openClientModal()">+ Add Client</button></div>
+    <div class="table-container"><table><thead><tr><th>Client</th><th>Contact</th><th>Phone</th><th>Active Requests</th><th>Workers Allocated</th><th>Status</th><th>Actions</th></tr></thead><tbody id="clientsTable"></tbody></table></div>
+</div>
+</section>
+
+<section id="departments" class="page">
+<div class="section">
+    <div class="section-header"><h2>Departments</h2><button class="primary" onclick="openDepartmentModal()">+ Add Department</button></div>
+    <div class="table-container"><table><thead><tr><th>Department</th><th>Parent</th><th>Workers</th></tr></thead><tbody id="departmentsTable"></tbody></table></div>
+</div>
+</section>
+
+<section id="payroll" class="page">
+<div class="section">
+    <div class="section-header"><h2>Payroll</h2><div class="controls"><select id="payrollPeriod" onchange="renderPayroll()"><option value="first">1 – 15 August 2026</option><option value="second">16 – 31 August 2026</option></select><button class="primary" onclick="calculatePayroll()">Calculate Payroll</button></div></div>
+    <div class="inner-padding"><div class="cards"><div class="card"><div class="card-label">Workers Paid</div><div class="card-value" id="payrollWorkers">0</div></div><div class="card"><div class="card-label">Regular Pay</div><div class="card-value" id="payrollRegular">KSh 0</div></div><div class="card"><div class="card-label">Overtime</div><div class="card-value" id="payrollOvertime">KSh 0</div></div><div class="card"><div class="card-label">Gross Payroll</div><div class="card-value" id="payrollGross">KSh 0</div></div></div>
+    <div class="section"><div class="section-header"><h2>Payroll Breakdown</h2><button class="secondary" onclick="exportPayroll()">Export CSV</button></div><div class="table-container"><table><thead><tr><th>Worker</th><th>Days</th><th>Daily Rate</th><th>Regular</th><th>OT Hours</th><th>OT Pay</th><th>Gross</th></tr></thead><tbody id="payrollTable"></tbody></table></div></div></div>
+</div>
+</section>
+
+
+<section id="deployments" class="page">
+<div class="section">
+  <div class="section-header"><h2>Worker Deployments</h2><div class="controls"><select id="deploymentClientFilter" onchange="renderDeployments()"><option value="all">All Clients</option></select><select id="deploymentStatusFilter" onchange="renderDeployments()"><option value="all">All Status</option><option>Active</option><option>Ended</option></select></div></div>
+  <div class="table-container"><table><thead><tr><th>Worker</th><th>Client</th><th>Department</th><th>Assignment</th><th>Shift</th><th>Start</th><th>End</th><th>Status</th><th>Action</th></tr></thead><tbody id="deploymentsTable"></tbody></table></div>
+</div>
+</section>
+
+<section id="availability" class="page">
+<div class="section">
+  <div class="section-header"><h2>Workforce Availability</h2><button class="primary" onclick="openAvailableDeployment()">Deploy Available Worker</button></div>
+  <div class="inner-padding"><div class="cards" id="availabilityCards"></div></div>
+  <div class="section-header"><h2>Available Workers</h2><div class="controls"><select id="availabilityClassFilter" onchange="renderAvailability()"><option value="all">All Classifications</option><option>Skilled</option><option>Unskilled</option><option>Supervisor</option></select><select id="availabilityDeptFilter" onchange="renderAvailability()"><option value="all">All Departments</option></select></div></div>
+  <div class="table-container"><table><thead><tr><th>Employee</th><th>Worker</th><th>Department</th><th>Classification</th><th>Attendance</th><th>Availability</th><th>Action</th></tr></thead><tbody id="availabilityTable"></tbody></table></div>
+</div>
+</section>
+
+<section id="exceptions" class="page">
+<div class="section">
+  <div class="section-header"><h2>Exception Centre</h2><button class="secondary" onclick="renderExceptions()">Refresh</button></div>
+  <div class="inner-padding"><div class="cards" id="exceptionCards"></div></div>
+  <div class="table-container"><table><thead><tr><th>Severity</th><th>Exception</th><th>Details</th><th>Detected</th><th>Action</th></tr></thead><tbody id="exceptionsTable"></tbody></table></div>
+</div>
+</section>
+
+<section id="audit" class="page">
+<div class="section">
+  <div class="section-header"><h2>Audit Trail</h2><button class="secondary" onclick="renderAudit()">Refresh</button></div>
+  <div class="table-container"><table><thead><tr><th>Time</th><th>Action</th><th>Reference</th><th>Details</th></tr></thead><tbody id="auditTable"></tbody></table></div>
+</div>
+</section>
+
+<section id="users" class="page">
+<div class="section">
+  <div class="section-header">
+    <div><h2>Users & Access</h2><small class="muted">Create accounts, assign roles, promote, demote and control access.</small></div>
+    <div class="controls"><input type="search" id="userSearch" placeholder="Search user..." oninput="renderUsers()"><select id="userRoleFilter" onchange="renderUsers()"><option value="all">All Roles</option></select><button class="primary" onclick="openUserModal()">+ Create User</button></div>
+  </div>
+  <div class="cards" id="userSummaryCards"></div>
+  <div class="table-container"><table><thead><tr><th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Permissions</th><th>Updated</th><th>Actions</th></tr></thead><tbody id="usersTable"></tbody></table></div>
+</div>
+</section>
+
+<section id="reports" class="page">
+<div class="section"><div class="section-header"><h2>Reports</h2><button class="primary" onclick="exportAttendance()">Export Attendance CSV</button></div><div class="inner-padding"><div class="cards"><div class="card"><div class="card-label">Active Workers</div><div class="card-value" id="reportWorkers">0</div></div><div class="card"><div class="card-label">Clients</div><div class="card-value" id="reportClients">0</div></div><div class="card"><div class="card-label">Departments</div><div class="card-value" id="reportDepartments">0</div></div><div class="card"><div class="card-label">Today's Attendance</div><div class="card-value" id="reportAttendance">Pending</div></div></div></div></div>
+</section>
+
+</div></main></div>
+
+<!-- Worker modal -->
+<div class="modal-overlay" id="workerModal"><div class="modal"><div class="modal-header"><h2 id="workerModalTitle">Add Worker</h2><button class="close-btn" onclick="closeModal('workerModal')">×</button></div><div class="modal-body"><input type="hidden" id="editingWorkerId"><div class="form-group"><label>Employee Number</label><input id="workerNo" readonly class="readonly"><small>Automatically generated.</small></div><div class="form-group"><label>Full Name</label><input id="workerName" placeholder="Worker name"></div><div class="form-grid"><div class="form-group"><label>Department</label><select id="workerDepartment"></select></div><div class="form-group"><label>Classification</label><select id="workerClassification"><option>Skilled</option><option>Unskilled</option><option>Supervisor</option></select></div></div><div class="form-grid"><div class="form-group"><label>Daily Rate (KSh)</label><input type="number" id="workerRate" min="0"></div><div class="form-group"><label>OT Rate / Hour (KSh)</label><input type="number" id="workerOtRate" min="0"></div></div><div class="form-group"><label>Date Joined</label><input type="date" id="workerJoinDate"></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('workerModal')">Cancel</button><button class="primary" onclick="saveWorker()">Save Worker</button></div></div></div>
+
+<!-- Department modal -->
+<div class="modal-overlay" id="departmentModal"><div class="modal"><div class="modal-header"><h2>Add Department</h2><button class="close-btn" onclick="closeModal('departmentModal')">×</button></div><div class="modal-body"><div class="form-group"><label>Department Name</label><input id="departmentName" placeholder="e.g. Logistics"></div><div class="form-group"><label>Parent Department</label><select id="departmentParent"></select></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('departmentModal')">Cancel</button><button class="primary" onclick="saveDepartment()">Save Department</button></div></div></div>
+
+<!-- Client modal -->
+<div class="modal-overlay" id="clientModal"><div class="modal"><div class="modal-header"><h2 id="clientModalTitle">Add Client</h2><button class="close-btn" onclick="closeModal('clientModal')">×</button></div><div class="modal-body"><input type="hidden" id="editingClientId"><div class="form-group"><label>Company Name</label><input id="clientName" placeholder="Mother company / client"></div><div class="form-grid"><div class="form-group"><label>Contact Person</label><input id="clientContact" placeholder="Contact name"></div><div class="form-group"><label>Phone</label><input id="clientPhone" placeholder="Phone number"></div></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('clientModal')">Cancel</button><button class="primary" onclick="saveClient()">Save Client</button></div></div></div>
+
+<!-- Request modal -->
+<div class="modal-overlay" id="requestModal"><div class="modal"><div class="modal-header"><h2 id="requestModalTitle">New Labour Request</h2><button class="close-btn" onclick="closeModal('requestModal')">×</button></div><div class="modal-body"><input type="hidden" id="editingRequestId"><div class="form-grid"><div class="form-group"><label>Client / Mother Company</label><select id="requestClient"></select></div><div class="form-group"><label>Department</label><select id="requestDepartment"></select></div></div><div class="form-grid"><div class="form-group"><label>Workers Required</label><input type="number" id="requestWorkers" min="1" value="1"></div><div class="form-group"><label>Classification</label><select id="requestClassification"><option>Skilled</option><option>Unskilled</option><option>Supervisor</option><option>Any</option></select></div></div><div class="form-grid"><div class="form-group"><label>Start Date</label><input type="date" id="requestStartDate"></div><div class="form-group"><label>Duration (days)</label><input type="number" id="requestDuration" min="1" value="1"></div></div><div class="form-group"><label>Shift</label><select id="requestShift"><option>Day</option><option>Night</option><option>Rotating</option></select></div><div class="form-group"><label>Reason / Notes</label><textarea id="requestNotes" rows="3" placeholder="Optional request details"></textarea></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('requestModal')">Cancel</button><button class="primary" onclick="saveRequest()">Save Request</button></div></div></div>
+
+<!-- Allocation modal -->
+<div class="modal-overlay" id="allocationModal"><div class="modal wide"><div class="modal-header"><h2>Allocate Workers</h2><button class="close-btn" onclick="closeModal('allocationModal')">×</button></div><div class="modal-body"><input type="hidden" id="allocationRequestId"><div id="allocationSummary" class="allocation-summary"></div><div class="worker-picker" id="workerPicker"></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('allocationModal')">Cancel</button><button class="primary" onclick="saveAllocation()">Allocate Selected Workers</button></div></div></div>
+
+<!-- Direct deployment modal -->
+<div class="modal-overlay" id="deploymentModal"><div class="modal"><div class="modal-header"><h2>Deploy Worker</h2><button class="close-btn" onclick="closeModal('deploymentModal')">×</button></div><div class="modal-body"><input type="hidden" id="deploymentWorkerId"><div class="form-group"><label>Worker</label><input id="deploymentWorkerName" readonly class="readonly"></div><div class="form-group"><label>Client / Mother Company</label><select id="deploymentClient"></select></div><div class="form-group"><label>Department</label><select id="deploymentDepartment"></select></div><div class="form-grid"><div class="form-group"><label>Start Date</label><input type="date" id="deploymentStartDate"></div><div class="form-group"><label>Assignment</label><input id="deploymentAssignment" placeholder="e.g. Production Line A"></div></div><div class="form-group"><label>Labour Request</label><select id="deploymentRequest"><option value="">Direct deployment — no request</option></select></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('deploymentModal')">Cancel</button><button class="primary" onclick="saveDeployment()">Save Deployment</button></div></div></div>
+
+
+<div class="modal-overlay" id="endDeploymentModal"><div class="modal"><div class="modal-header"><h2>End Deployment</h2><button class="close-btn" onclick="closeModal('endDeploymentModal')">×</button></div><div class="modal-body"><input type="hidden" id="endingDeploymentId"><div class="form-group"><label>End Date</label><input type="date" id="deploymentEndDate"></div><div class="form-group"><label>Reason</label><input id="deploymentEndReason" placeholder="Completed assignment, transfer, etc."></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('endDeploymentModal')">Cancel</button><button class="primary" onclick="endDeployment()">End Deployment</button></div></div></div>
+
+<div class="modal-overlay" id="userModal"><div class="modal wide">
+<div class="modal-header"><h2 id="userModalTitle">Create Labour Force User</h2><button class="close-btn" onclick="closeModal('userModal')">×</button></div>
+<div class="modal-body">
+<input type="hidden" id="editingUserId">
+<div class="form-grid"><div class="form-group"><label>Full Name</label><input id="userFullName" placeholder="e.g. Jane Wanjiku"></div><div class="form-group"><label>Email</label><input id="userEmail" type="email" placeholder="name@company.com"></div></div>
+<div class="form-grid"><div class="form-group"><label>Role</label><select id="userRole"></select></div><div class="form-group"><label>Phone</label><input id="userPhone" placeholder="Optional"></div></div>
+<div id="userPasswordGroup" class="form-group"><label>Temporary Password</label><input id="userPassword" type="password" autocomplete="new-password" placeholder="Minimum 8 characters"><small>The user can use this to sign in. Do not reuse passwords.</small></div>
+<div class="form-group"><label>Status</label><select id="userActive"><option value="true">Active</option><option value="false">Inactive</option></select></div>
+<div class="access-preview" id="userPermissionPreview"><strong>Role permissions</strong><div class="permission-grid"></div></div>
+<div class="user-warning" id="userWarning"></div>
+</div>
+<div class="modal-footer"><button class="secondary" onclick="closeModal('userModal')">Cancel</button><button class="primary" id="saveUserBtn" onclick="saveUserAccount()">Create User</button></div>
+</div></div>
+
+<div class="toast" id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+<script src="advanced.js"></script>
+<script src="supabase.js"></script>
+<script src="users.js"></script>
+</body>
+</html>
