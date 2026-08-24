@@ -17,6 +17,11 @@
 <button onclick="showPage('availability', this)"><span class="nav-icon">🟢</span>Availability</button>
 <button onclick="showPage('exceptions', this)"><span class="nav-icon">🚨</span>Exceptions</button>
         <button onclick="showPage('attendance', this)"><span class="nav-icon">📝</span>Attendance</button>
+        <button onclick="showPage('jts', this)"><span class="nav-icon">🟢</span>JTS Roll Call</button>
+        <button onclick="showPage('jts-history', this)"><span class="nav-icon">📜</span>JTS History</button>
+        <button onclick="showPage('jts-payroll', this)"><span class="nav-icon">💸</span>JTS Payroll</button>
+        <button onclick="showPage('supervisor', this)"><span class="nav-icon">🛡️</span>Supervisor Portal</button>
+        <button onclick="showPage('worker-portal', this)"><span class="nav-icon">🧑</span>My Attendance</button>
         <button onclick="showPage('approval', this)"><span class="nav-icon">✓</span>Approval</button>
         <button onclick="showPage('workers', this)"><span class="nav-icon">👥</span>Workers</button>
         <button onclick="showPage('clients', this)"><span class="nav-icon">🏭</span>Clients</button>
@@ -29,7 +34,7 @@
 </aside>
 
 <main class="main">
-<header class="topbar"><h1 id="pageTitle">Dashboard</h1><div class="user"><div class="avatar">A</div>Administrator</div></header>
+<header class="topbar"><h1 id="pageTitle">Dashboard</h1><div class="user"><button class="secondary compact-toggle" onclick="toggleCompactView()">Compact view</button><div class="avatar">A</div>Administrator</div></header>
 <div class="content">
 
 <section id="dashboard" class="page active">
@@ -39,9 +44,10 @@
         <div class="card"><span class="card-icon">✓</span><div class="card-label">Worked Today</div><div class="card-value" id="dashboardWorked">0</div><div class="card-sub">Attendance recorded</div></div>
         <div class="card"><span class="card-icon">!</span><div class="card-label">Missing</div><div class="card-value" id="dashboardMissing">0</div><div class="card-sub">Needs attention</div></div>
     </div>
-    <div class="section">
-        <div class="section-header"><h2>Today's Attendance</h2><button class="primary" onclick="showPage('attendance')">Record Attendance</button></div>
-        <div class="table-container"><table><thead><tr><th>Worker</th><th>Department</th><th>Classification</th><th>Rate</th><th>Status</th></tr></thead><tbody id="dashboardAttendance"></tbody></table></div>
+    <div class="section dashboard-command">
+        <div class="section-header"><div><h2>Workforce Command Board</h2><small class="muted">Live attendance by designation and department</small></div><div class="controls"><input type="date" id="dashboardDate" onchange="renderFuturisticDashboard()"><input type="search" id="dashboardWorkerSearch" placeholder="Search present workers..." oninput="renderFuturisticDashboard()"><select id="dashboardDesignationFilter" onchange="renderFuturisticDashboard()"><option value="all">All designations</option></select><select id="dashboardDepartmentFilter" onchange="renderFuturisticDashboard()"><option value="all">All departments</option></select><button class="primary" onclick="showPage('attendance')">Record Attendance</button></div></div>
+        <div class="dashboard-groups" id="dashboardDesignationGroups"></div>
+        <div class="table-container"><table><thead><tr><th>Worker</th><th>ID</th><th>Designation</th><th>Department</th><th>Hours</th><th>OT</th><th>State</th></tr></thead><tbody id="dashboardAttendance"></tbody></table></div>
     </div>
     <div class="section">
         <div class="section-header"><h2>Recent Labour Requests</h2><button class="secondary" onclick="showPage('requests')">View Requests</button></div>
@@ -73,10 +79,41 @@
 </div>
 </section>
 
+<section id="jts" class="page">
+<div class="section">
+    <div class="section-header"><h2>JTS Daily Roll Call</h2><div class="controls"><input type="date" id="jtsDate" onchange="renderJtsAttendance()"><button class="primary" onclick="generateJtsRoster()">Generate Today’s Roster</button></div></div>
+    <div class="controls" style="margin-top: 12px; margin-bottom: 12px;"><input type="file" id="jtsWorkbookInput" accept=".xlsx,.xls,.csv" onchange="importJtsWorkbookFromInput(this.files && this.files[0])"><button class="secondary" onclick="importJtsWorkbookFromInput(document.getElementById('jtsWorkbookInput').files && document.getElementById('jtsWorkbookInput').files[0])">Import July workbook</button></div>
+    <div class="jts-summary" id="jtsSummary"></div>
+    <div class="table-container"><table><thead><tr><th>Worker</th><th>ID</th><th>Department</th><th>Status</th><th>Hours</th><th>OT</th><th>Action</th></tr></thead><tbody id="jtsAttendanceTable"></tbody></table></div>
+</div>
+</section>
+
+<section id="jts-history" class="page">
+<div class="section">
+    <div class="section-header"><h2>Worker History & Disputes</h2><div class="controls"><select id="jtsHistoryWorker" onchange="renderJtsHistory()"></select></div></div>
+    <div class="jts-rollup" id="jtsRollup"></div>
+    <div class="table-container"><table><thead><tr><th>Date</th><th>Worked</th><th>Hours</th><th>OT</th><th>Dispute</th></tr></thead><tbody id="jtsHistoryTable"></tbody></table></div>
+</div>
+</section>
+
+<section id="jts-payroll" class="page">
+<div class="section">
+    <div class="section-header"><h2>JTS Payroll Review</h2><div class="controls"><input type="search" id="jtsPayrollSearch" placeholder="Search name, ID or staff no." oninput="renderJtsPayroll()"><select id="jtsPayrollDesignation" onchange="renderJtsPayroll()"><option value="all">All designations</option></select><select id="jtsPayrollPeriod" onchange="renderJtsPayroll()"><option value="current">July 2026</option></select><button class="primary" onclick="renderJtsPayroll()">Calculate</button></div></div>
+    <div class="jts-summary" id="jtsPayrollSummary"></div>
+    <div class="payroll-settings"><strong>Shared deductions</strong><label>NSSF % <input id="jtsNssfRate" type="number" min="0" step="0.01" value="6"></label><label>Housing levy % <input id="jtsHousingRate" type="number" min="0" step="0.01" value="1.5"></label><label>SHIF % <input id="jtsShifRate" type="number" min="0" step="0.01" value="0.5"></label><label>PAYE % <input id="jtsPayeRate" type="number" min="0" step="0.01" value="10"></label><button class="secondary" onclick="applyJtsDeductionRates()">Apply to payroll</button></div>
+    <div class="table-container"><table><thead><tr><th>Worker</th><th>Days</th><th>Normal</th><th>OT</th><th>Gross</th><th>Deductions</th><th>Net</th><th>Review</th></tr></thead><tbody id="jtsPayrollTable"></tbody></table></div>
+</div>
+</section>
+
+<section id="supervisor" class="page"><div class="section supervisor-portal"><div class="section-header"><div><h2>Supervisor Attendance</h2><small class="muted">Attendance only. Search a worker to add them to today’s marked list.</small></div><div class="controls"><input type="date" id="supervisorDate" onchange="renderSupervisorPortal()"><input type="search" id="supervisorSearch" placeholder="Search worker name or ID" oninput="renderSupervisorPortal()"></div></div><div class="jts-summary" id="supervisorSummary"></div><div class="supervisor-search-results" id="supervisorSearchResults"></div><div class="bulk-actions"><button class="secondary" onclick="editSelectedSupervisor()">Edit selected</button><button class="secondary" onclick="cancelSelectedSupervisor()">Cancel selected</button><button class="primary" onclick="submitSupervisorAttendance()">Submit final copy</button></div><div class="table-container"><table><thead><tr><th>Select</th><th>Worker</th><th>ID</th><th>Status</th><th>Hours</th><th>OT</th><th>Action</th></tr></thead><tbody id="supervisorTable"></tbody></table></div></div></section>
+
+<section id="worker-portal" class="page"><div class="section worker-portal"><div class="section-header"><div><h2>My Attendance</h2><small class="muted">Your personal attendance ledger</small></div><div class="controls"><input type="date" id="workerPortalFrom" onchange="renderWorkerPortal()"><input type="date" id="workerPortalTo" onchange="renderWorkerPortal()"><select id="workerPortalStatus" onchange="renderWorkerPortal()"><option value="all">All statuses</option><option value="present">Present</option><option value="absent">Absent</option></select></div></div><div class="jts-summary" id="workerPortalSummary"></div><div class="table-container"><table><thead><tr><th>Date</th><th>Department</th><th>Designation</th><th>Status</th><th>Hours</th><th>OT</th><th>Action</th></tr></thead><tbody id="workerPortalTable"></tbody></table></div></div></section>
+
 <section id="workers" class="page">
 <div class="section">
     <div class="section-header"><h2>Workers</h2><div class="controls"><input type="search" id="workerSearch" placeholder="Search worker..." oninput="renderWorkers()"><select id="workerDepartmentFilter" onchange="renderWorkers()"></select><button class="primary" onclick="openWorkerModal()">+ Add Worker</button></div></div>
-    <div class="table-container"><table><thead><tr><th>Employee No.</th><th>Worker</th><th>Department</th><th>Classification</th><th>Daily Rate</th><th>OT Rate</th><th>Deployment</th><th>Status</th><th>Actions</th></tr></thead><tbody id="workersTable"></tbody></table></div>
+    <div class="controls" style="margin: 12px 0;"><label><input type="checkbox" id="selectAllWorkers" onchange="toggleAllWorkers(this.checked)"> Select all visible</label><select id="workerBulkAction"><option value="">Choose bulk action</option><option value="activate">Activate selected</option><option value="deactivate">Deactivate selected</option><option value="department">Move to department</option><option value="designation">Assign designation</option><option value="rates">Change rates</option></select><button class="secondary" onclick="applyWorkerBulkAction()">Apply to selected</button><span id="workerSelectionCount" class="muted">0 selected</span></div>
+    <div class="table-container"><table><thead><tr><th>Select</th><th>Employee No.</th><th>Worker</th><th>Department</th><th>Designation</th><th>Daily Rate</th><th>OT Rate</th><th>Deployment</th><th>Status</th><th>Actions</th></tr></thead><tbody id="workersTable"></tbody></table></div>
 </div>
 </section>
 
@@ -90,7 +127,7 @@
 <section id="departments" class="page">
 <div class="section">
     <div class="section-header"><h2>Departments</h2><button class="primary" onclick="openDepartmentModal()">+ Add Department</button></div>
-    <div class="table-container"><table><thead><tr><th>Department</th><th>Parent</th><th>Workers</th></tr></thead><tbody id="departmentsTable"></tbody></table></div>
+    <div class="table-container"><table><thead><tr><th>Department</th><th>Parent</th><th>Workers</th><th>Daily wage</th><th>OT wage</th></tr></thead><tbody id="departmentsTable"></tbody></table></div>
 </div>
 </section>
 
@@ -152,10 +189,10 @@
 </div></main></div>
 
 <!-- Worker modal -->
-<div class="modal-overlay" id="workerModal"><div class="modal"><div class="modal-header"><h2 id="workerModalTitle">Add Worker</h2><button class="close-btn" onclick="closeModal('workerModal')">×</button></div><div class="modal-body"><input type="hidden" id="editingWorkerId"><div class="form-group"><label>Employee Number</label><input id="workerNo" readonly class="readonly"><small>Automatically generated.</small></div><div class="form-group"><label>Full Name</label><input id="workerName" placeholder="Worker name"></div><div class="form-grid"><div class="form-group"><label>Department</label><select id="workerDepartment"></select></div><div class="form-group"><label>Classification</label><select id="workerClassification"><option>Skilled</option><option>Unskilled</option><option>Supervisor</option></select></div></div><div class="form-grid"><div class="form-group"><label>Daily Rate (KSh)</label><input type="number" id="workerRate" min="0"></div><div class="form-group"><label>OT Rate / Hour (KSh)</label><input type="number" id="workerOtRate" min="0"></div></div><div class="form-group"><label>Date Joined</label><input type="date" id="workerJoinDate"></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('workerModal')">Cancel</button><button class="primary" onclick="saveWorker()">Save Worker</button></div></div></div>
+<div class="modal-overlay" id="workerModal"><div class="modal"><div class="modal-header"><h2 id="workerModalTitle">Add Worker</h2><button class="close-btn" onclick="closeModal('workerModal')">×</button></div><div class="modal-body"><input type="hidden" id="editingWorkerId"><div class="form-group"><label>Employee Number</label><input id="workerNo" readonly class="readonly"><small>Automatically generated.</small></div><div class="form-grid"><div class="form-group"><label>Full Name</label><input id="workerName" placeholder="Worker name"></div><div class="form-group"><label>ID Number / National ID</label><input id="workerIdNumber" placeholder="e.g. 12345678"></div></div><div class="form-grid"><div class="form-group"><label>Department</label><select id="workerDepartment"></select></div><div class="form-group"><label>Designation</label><input id="workerDesignation" placeholder="Operator / Loader / Supervisor"></div></div><div class="form-grid"><div class="form-group"><label>Classification</label><select id="workerClassification"><option>Skilled</option><option>Unskilled</option><option>Supervisor</option></select></div><div class="form-group"><label>Phone</label><input id="workerPhone" placeholder="Optional"></div></div><div class="form-grid"><div class="form-group"><label>Daily Rate (KSh)</label><input type="number" id="workerRate" min="0"></div><div class="form-group"><label>OT Rate / Hour (KSh)</label><input type="number" id="workerOtRate" min="0"></div></div><div class="form-group"><label>Date Joined</label><input type="date" id="workerJoinDate"></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('workerModal')">Cancel</button><button class="primary" onclick="saveWorker()">Save Worker</button></div></div></div>
 
 <!-- Department modal -->
-<div class="modal-overlay" id="departmentModal"><div class="modal"><div class="modal-header"><h2>Add Department</h2><button class="close-btn" onclick="closeModal('departmentModal')">×</button></div><div class="modal-body"><div class="form-group"><label>Department Name</label><input id="departmentName" placeholder="e.g. Logistics"></div><div class="form-group"><label>Parent Department</label><select id="departmentParent"></select></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('departmentModal')">Cancel</button><button class="primary" onclick="saveDepartment()">Save Department</button></div></div></div>
+<div class="modal-overlay" id="departmentModal"><div class="modal"><div class="modal-header"><h2>Add Department</h2><button class="close-btn" onclick="closeModal('departmentModal')">×</button></div><div class="modal-body"><div class="form-group"><label>Department Name</label><input id="departmentName" placeholder="e.g. Logistics"></div><div class="form-group"><label>Parent Department</label><select id="departmentParent"></select></div><div class="form-grid"><div class="form-group"><label>Default daily wage</label><input id="departmentRate" type="number" min="0" step="0.01"></div><div class="form-group"><label>Default OT wage/hour</label><input id="departmentOtRate" type="number" min="0" step="0.01"></div></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('departmentModal')">Cancel</button><button class="primary" onclick="saveDepartment()">Save Department</button></div></div></div>
 
 <!-- Client modal -->
 <div class="modal-overlay" id="clientModal"><div class="modal"><div class="modal-header"><h2 id="clientModalTitle">Add Client</h2><button class="close-btn" onclick="closeModal('clientModal')">×</button></div><div class="modal-body"><input type="hidden" id="editingClientId"><div class="form-group"><label>Company Name</label><input id="clientName" placeholder="Mother company / client"></div><div class="form-grid"><div class="form-group"><label>Contact Person</label><input id="clientContact" placeholder="Contact name"></div><div class="form-group"><label>Phone</label><input id="clientPhone" placeholder="Phone number"></div></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('clientModal')">Cancel</button><button class="primary" onclick="saveClient()">Save Client</button></div></div></div>
@@ -188,6 +225,7 @@
 
 <div class="toast" id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="config.js"></script>
 <script src="data.js"></script>
 <script src="app.js"></script>

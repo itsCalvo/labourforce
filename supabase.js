@@ -68,10 +68,16 @@ function updateConnectionUI(){
   } else { btn.textContent='Connect'; btn.onclick=showLfLogin; }
 }
 
-async function tableRows(table, select='*'){ const {data,error}=await labourForceSupabase.from(table).select(select); if(error) throw error; return data||[]; }
+function withCloudTimeout(promise, label){ return Promise.race([promise, new Promise((_,reject)=>setTimeout(()=>reject(new Error(`Supabase request timed out: ${label}`)),15000))]); }
+async function tableRows(table, select='*'){ const {data,error}=await withCloudTimeout(labourForceSupabase.from(table).select(select),`read ${table}`); if(error) throw error; return data||[]; }
 async function upsert(table, row){
-  const {data,error}=await labourForceSupabase.from(table).upsert(row,{onConflict:'id'}).select('id').single();
+  const {data,error}=await withCloudTimeout(labourForceSupabase.from(table).upsert(row,{onConflict:'id'}).select('id').single(),`write ${table}`);
   if(error) throw error; return data;
+}
+async function upsertBatch(table, rows){
+  if(!rows.length)return;
+  const {error}=await withCloudTimeout(labourForceSupabase.from(table).upsert(rows,{onConflict:'id'}),`batch write ${table}`);
+  if(error)throw error;
 }
 function deptRemote(name){ const d=departments.find(x=>x.name===name); return d ? rid('department', d.name) : null; }
 function clientRemote(id){ return id==null ? null : rid('client',id); }
@@ -79,19 +85,64 @@ function workerRemote(id){ return id==null ? null : rid('worker',id); }
 function profileId(){ return labourForceSession?.user?.id || null; }
 
 async function syncClients(){
-  for(const c of clients){ await upsert('clients',{id:rid('client',c.id),client_code:c.clientCode||`CL-${String(c.id).padStart(4,'0')}`,name:c.name,contact_person:c.contact||null,phone:c.phone||null,email:c.email||null,address:c.address||null,active:c.active!==false,notes:c.notes||null}); }
+  const {data:existing,error}=await labourForceSupabase.from('clients').select('id,client_code');
+  if(error) throw error;
+  const remoteByCode=new Map((existing||[]).map(client=>[client.client_code,client.id]));
+  const rows=[];
+  for(const c of clients){
+    const clientCode=c.clientCode||`CL-${String(c.id).padStart(4,'0')}`;
+    const existingId=remoteByCode.get(clientCode);
+    if(existingId) setRid('client',c.id,existingId);
+    rows.push({id:existingId||rid('client',c.id),client_code:clientCode,name:c.name,contact_person:c.contact||null,phone:c.phone||null,email:c.email||null,address:c.address||null,active:c.active!==false,notes:c.notes||null});
+  }
+  await upsertBatch('clients',rows);
 }
 async function syncDepartments(){
-  for(const d of departments){ await upsert('departments',{id:rid('department',d.name),name:d.name,parent_id:d.parent?deptRemote(d.parent):null,active:d.active!==false}); }
+  const {data:existing,error}=await labourForceSupabase.from('departments').select('id,name');
+  if(error) throw error;
+  const remoteByName=new Map((existing||[]).map(department=>[String(department.name||'').trim().toLowerCase(),department.id]));
+  const uniqueDepartments=[];
+  const seen=new Set();
+  for(const department of departments){
+    const name=String(department.name||'').replace(/\s+/g,' ').trim();
+    const key=name.toLowerCase();
+    if(!name||seen.has(key)) continue;
+    seen.add(key);
+    const existingId=remoteByName.get(key);
+    if(existingId) setRid('department',name,existingId);
+    uniqueDepartments.push({...department,name});
+  }
+  departments=uniqueDepartments;
+  const rows=departments.map(d=>({id:rid('department',d.name),name:d.name,parent_id:d.parent?deptRemote(d.parent):null,default_daily_rate:Number(d.rate||0),default_overtime_rate:Number(d.otRate||0),active:d.active!==false}));
+  try{await upsertBatch('departments',rows);}catch(error){if(error.code!=='42703')throw error;await upsertBatch('departments',rows.map(({default_daily_rate,default_overtime_rate,...row})=>row));}
 }
 async function syncWorkers(){
-  for(const w of workers){ await upsert('workers',{id:rid('worker',w.id),employee_no:w.employeeNo,full_name:w.name,phone:w.phone||null,national_id:w.nationalId||null,department_id:deptRemote(w.department),classification:w.classification||'Unskilled',daily_rate:Number(w.rate||0),overtime_rate:Number(w.otRate||0),join_date:w.joinDate||null,active:w.active!==false,notes:w.notes||null}); }
+  const {data:existing,error}=await labourForceSupabase.from('workers').select('id,employee_no,id_number');
+  if(error) throw error;
+  const remoteByIdentity=new Map();
+  (existing||[]).forEach(worker=>{if(worker.id_number)remoteByIdentity.set(`id:${String(worker.id_number).trim().toLowerCase()}`,worker.id);if(worker.employee_no)remoteByIdentity.set(`staff:${String(worker.employee_no).trim().toLowerCase()}`,worker.id);});
+  const uniqueWorkers=[],seen=new Set();
+  for(const worker of workers){
+    const key=String(worker.idNumber||`${worker.employeeNo}|${worker.name}`).replace(/\s+/g,' ').trim().toLowerCase();
+    if(!key||seen.has(key))continue;
+    seen.add(key); uniqueWorkers.push(worker);
+  }
+  workers=uniqueWorkers;
+  const rows=[];
+  for(const w of workers){const existingId=remoteByIdentity.get(`id:${String(w.idNumber||'').trim().toLowerCase()}`)||remoteByIdentity.get(`staff:${String(w.employeeNo||'').trim().toLowerCase()}`);if(existingId)setRid('worker',w.id,existingId);rows.push({id:existingId||rid('worker',w.id),employee_no:w.employeeNo,full_name:w.name,phone:w.phone||null,national_id:w.nationalId||w.idNumber||null,id_number:w.idNumber||w.nationalId||null,kra_pin:w.kraPin||null,nssf_number:w.nssfNumber||null,account_number:w.accountNumber||null,shif_number:w.shifNumber||null,department_id:deptRemote(w.department),classification:w.classification||'Unskilled',designation:w.designation||null,daily_rate:Number(w.rate||0),overtime_rate:Number(w.otRate||0),join_date:w.joinDate||null,source_sheet:w.workbookSource||null,active:w.active!==false,notes:w.notes||null}); }
+  for(let index=0;index<rows.length;index+=100)await upsertBatch('workers',rows.slice(index,index+100));
 }
 async function syncRequests(){
+  const {data:existing,error}=await labourForceSupabase.from('labour_requests').select('id,request_no');
+  if(error) throw error;
+  const remoteByNumber=new Map((existing||[]).map(request=>[String(request.request_no||'').trim().toLowerCase(),request.id]));
   for(const r of labourRequests){
     const end=r.endDate || (r.startDate && r.duration ? new Date(new Date(r.startDate+'T00:00:00').getTime()+(Number(r.duration)-1)*86400000).toISOString().slice(0,10) : null);
     const statusMap={Pending:'pending',Approved:'approved',Allocated:'partially_fulfilled',Completed:'fulfilled',Cancelled:'cancelled',Rejected:'rejected'};
-    await upsert('labour_requests',{id:rid('request',r.id),request_no:r.requestNo,client_id:clientRemote(r.clientId),department_id:deptRemote(r.department),classification:r.classification||null,workers_required:Number(r.workersRequired||1),start_date:r.startDate,end_date:end,shift:r.shift||null,location:r.location||null,reason:r.reason||null,notes:r.notes||null,status:statusMap[r.status]||'pending',requested_by:profileId(),approved_by:null,approved_at:null});
+    if(!clientRemote(r.clientId))continue;
+    const existingId=remoteByNumber.get(String(r.requestNo||'').trim().toLowerCase());
+    if(existingId)setRid('request',r.id,existingId);
+    await upsert('labour_requests',{id:existingId||rid('request',r.id),request_no:r.requestNo,client_id:clientRemote(r.clientId),department_id:deptRemote(r.department),classification:r.classification||null,workers_required:Number(r.workersRequired||1),start_date:r.startDate,end_date:end,shift:r.shift||null,location:r.location||null,reason:r.reason||null,notes:r.notes||null,status:statusMap[r.status]||'pending',requested_by:profileId(),approved_by:null,approved_at:null});
     const ids=r.allocatedWorkerIds||[];
     for(const workerId of ids){ await upsert('labour_request_workers',{id:rid('request_worker',`${r.id}:${workerId}`),request_id:rid('request',r.id),worker_id:workerRemote(workerId),allocated_by:profileId(),status:'allocated'}); }
   }
@@ -101,11 +152,21 @@ async function syncDeployments(){
   for(const d of deployments){ await upsert('deployments',{id:rid('deployment',d.id),worker_id:workerRemote(d.workerId),client_id:clientRemote(d.clientId),request_id:d.requestId?rid('request',d.requestId):null,department_id:deptRemote(d.department),position:d.assignment||null,location:d.location||null,start_date:d.startDate,end_date:d.endDate||null,shift:d.shift||null,status:d.status==='Active'?'active':d.status==='Ended'?'completed':String(d.status||'active').toLowerCase(),created_by:profileId()}); }
 }
 async function syncAttendance(){
+  const {data:cloudWorkers,error}=await labourForceSupabase.from('workers').select('id');
+  if(error)throw error;
+  const cloudWorkerIds=new Set((cloudWorkers||[]).map(worker=>String(worker.id)));
+  const rows=[];
   for(const [date,day] of Object.entries(attendance||{})) for(const [localWorkerId,r] of Object.entries(day.records||{})){
-    const status=r.status==='pending'?'pending':r.status;
+    const localWorker=workers.find(worker=>Number(worker.id)===Number(localWorkerId));
+    if(!localWorker)continue;
+    const remoteWorkerId=workerRemote(localWorkerId);
+    if(!remoteWorkerId||!cloudWorkerIds.has(String(remoteWorkerId)))continue;
+    const status=r.status==='present'?'worked':r.status==='approved'?'worked':r.status==='pending'?'pending':'absent';
     const deployment=typeof deployments!=='undefined'?deployments.find(d=>Number(d.workerId)===Number(localWorkerId)&&d.status==='Active'):null;
-    await upsert('attendance',{id:rid('attendance',`${date}:${localWorkerId}:${deployment?.id||'none'}`),attendance_date:date,worker_id:workerRemote(localWorkerId),deployment_id:deployment?rid('deployment',deployment.id):null,client_id:deployment?clientRemote(deployment.clientId):null,department_id:deptRemote(workers.find(w=>Number(w.id)===Number(localWorkerId))?.department),status,overtime_hours:Number(r.overtime||0),notes:r.notes||null,created_by:profileId(),updated_by:profileId()});
+    const attendanceRow={id:rid('attendance',`${date}:${localWorkerId}:${deployment?.id||'none'}`),attendance_date:date,worker_id:remoteWorkerId,deployment_id:deployment?rid('deployment',deployment.id):null,client_id:deployment?clientRemote(deployment.clientId):null,department_id:deptRemote(localWorker.department),status,overtime_hours:Number(r.overtime||0),notes:r.notes||null,created_by:profileId(),updated_by:profileId()};
+    rows.push(attendanceRow);
   }
+  for(let index=0;index<rows.length;index+=1000)await upsertBatch('attendance',rows.slice(index,index+1000));
 }
 async function syncPayroll(){
   // Payroll remains locally calculated; persisted records can be added later once a period is explicitly created.
@@ -129,9 +190,11 @@ async function syncLocalState(){
     toastSync('All changes saved to Supabase',true);
   }catch(error){
     console.error('[Labour Force] sync failed',error);
-    toastSync('Saved locally — cloud retry pending');
-    const detail=document.getElementById('lfSyncDetail'); if(detail) detail.textContent=`Cloud sync paused: ${error.message||'request failed'}`;
-  }finally{ syncBusy=false; if(pendingSync) queueBackendSync(); }
+    pendingSync=false;
+    clearTimeout(syncTimer);
+    toastSync('Cloud sync paused');
+    const detail=document.getElementById('lfSyncDetail'); if(detail) detail.textContent=`Sync error: ${error.message||'request failed'}`;
+  }finally{ syncBusy=false; }
 }
 function queueBackendSync(){ clearTimeout(syncTimer); syncTimer=setTimeout(syncLocalState,450); }
 
@@ -142,17 +205,19 @@ async function hydrateFromBackend(){
     if(localStorage.getItem('labourforce_cloud_dirty')==='1') return;
   }
   try{
-    const [rc,rd,rw,rr]=await Promise.all([tableRows('clients'),tableRows('departments'),tableRows('workers'),tableRows('labour_requests')]);
+    const [rc,rd,rw,rr]=await Promise.all([tableRows('clients','id,client_code,name,contact_person,phone,active'),tableRows('departments','id,name,parent_id,active'),tableRows('workers','id,employee_no,full_name,phone,national_id,id_number,kra_pin,nssf_number,shif_number,account_number,department_id,classification,designation,daily_rate,overtime_rate,join_date,source_sheet,active,notes'),tableRows('labour_requests','id,request_no,client_id,department_id,classification,workers_required,start_date,end_date,shift,notes,status')]);
     const map=lfMap();
     if(rc.length){ clients=rc.map(c=>{ let local=clients.find(x=>map.client?.[String(x.id)]===c.id); if(!local) local={id:Date.now()+Math.random()}; setRid('client',local.id,c.id); return {...local,name:c.name,contact:c.contact_person||'',phone:c.phone||'',active:c.active,clientCode:c.client_code}; }); }
-    if(rd.length){ departments=rd.map(d=>{ let local=departments.find(x=>map.department?.[String(x.name)]===d.id)||departments.find(x=>x.name===d.name)||{name:d.name}; setRid('department',local.name,d.id); return {...local,name:d.name,parent:rd.find(p=>p.id===d.parent_id)?.name||'',active:d.active}; }); }
-    if(rw.length){ workers=rw.map(w=>{ let local=workers.find(x=>map.worker?.[String(x.id)]===w.id)||workers.find(x=>x.employeeNo===w.employee_no)||{id:Date.now()+Math.random()}; setRid('worker',local.id,w.id); return {...local,employeeNo:w.employee_no,name:w.full_name,phone:w.phone||'',nationalId:w.national_id||'',department:rd.find(d=>d.id===w.department_id)?.name||'',classification:w.classification,rate:Number(w.daily_rate||0),otRate:Number(w.overtime_rate||0),joinDate:w.join_date||'',active:w.active,notes:w.notes||''}; }); }
+    if(rd.length){ departments=rd.map(d=>{ let local=departments.find(x=>map.department?.[String(x.name)]===d.id)||departments.find(x=>x.name===d.name)||{name:d.name}; setRid('department',local.name,d.id); return {...local,name:d.name,parent:rd.find(p=>p.id===d.parent_id)?.name||'',rate:Number(d.default_daily_rate||local.rate||0),otRate:Number(d.default_overtime_rate||local.otRate||0),active:d.active}; }); }
+    if(rw.length){ workers=rw.map(w=>{ let local=workers.find(x=>map.worker?.[String(x.id)]===w.id)||workers.find(x=>x.employeeNo===w.employee_no)||{id:Date.now()+Math.random()}; setRid('worker',local.id,w.id); return {...local,employeeNo:w.employee_no,name:w.full_name,phone:w.phone||'',nationalId:w.national_id||w.id_number||'',idNumber:w.id_number||w.national_id||'',kraPin:w.kra_pin||'',nssfNumber:w.nssf_number||'',shifNumber:w.shif_number||'',accountNumber:w.account_number||'',department:rd.find(d=>d.id===w.department_id)?.name||'',classification:w.classification,designation:w.designation||'',rate:Number(w.daily_rate||0),otRate:Number(w.overtime_rate||0),joinDate:w.join_date||'',workbookSource:w.source_sheet||'',active:w.active,notes:w.notes||''}; }); }
     if(rr.length){ const statusMap={pending:'Pending',approved:'Approved',rejected:'Rejected',partially_fulfilled:'Allocated',fulfilled:'Completed',cancelled:'Cancelled'}; labourRequests=rr.map(r=>{let local=labourRequests.find(x=>map.request?.[String(x.id)]===r.id)||labourRequests.find(x=>x.requestNo===r.request_no)||{id:Date.now()+Math.random(),allocatedWorkerIds:[]}; setRid('request',local.id,r.id); return {...local,requestNo:r.request_no,clientId:clients.find(c=>map.client?.[String(c.id)]===r.client_id)?.id||local.clientId,department:rd.find(d=>d.id===r.department_id)?.name||'',classification:r.classification||'',workersRequired:r.workers_required,startDate:r.start_date,duration:r.end_date?Math.max(1,Math.round((new Date(r.end_date)-new Date(r.start_date))/86400000)+1):1,shift:r.shift||'Day',notes:r.notes||'',status:statusMap[r.status]||'Pending'}; }); }
     localStorage.setItem('labourforce_workers',JSON.stringify(workers)); localStorage.setItem('labourforce_departments',JSON.stringify(departments)); localStorage.setItem('labourforce_clients',JSON.stringify(clients)); localStorage.setItem('labourforce_requests',JSON.stringify(labourRequests));
+    syncBusy=true;
     if(typeof populateFilters==='function')populateFilters(); if(typeof populateClientSelects==='function')populateClientSelects();
     if(typeof renderDashboard==='function')renderDashboard(); if(typeof renderWorkers==='function')renderWorkers(); if(typeof renderClients==='function')renderClients(); if(typeof renderDepartments==='function')renderDepartments(); if(typeof renderRequests==='function')renderRequests();
+    syncBusy=false;
+    localStorage.removeItem('labourforce_cloud_dirty');
     toastSync('Cloud data loaded',true); document.getElementById('lfSyncDetail').textContent='Backend is the source of truth; local cache is the recovery layer.';
-    queueBackendSync();
   }catch(error){ console.error('[Labour Force] hydrate failed',error); toastSync('Cloud read failed — local data retained'); }
 }
 
@@ -161,7 +226,7 @@ function installSaveHook(){
   // then schedule a cloud write so a browser crash/power cut never loses the current form state.
   const original=window.saveData;
   if(!original || original.__lfWrapped)return;
-  const wrapped=function(){ original(); localStorage.setItem('labourforce_cloud_dirty','1'); queueBackendSync(); };
+  const wrapped=function(){ const renderSave=/renderDashboard|renderAttendance|renderApproval|renderJtsAttendance|renderJtsHistory|renderJtsPayroll|renderWorkers/.test(new Error().stack||''); original(); if(renderSave||syncBusy)return; localStorage.setItem('labourforce_cloud_dirty','1'); queueBackendSync(); };
   wrapped.__lfWrapped=true; window.saveData=wrapped;
 }
 
@@ -173,6 +238,7 @@ function installSaveHook(){
   labourForceSupabase=supabase.createClient(LABOUR_FORCE_SUPABASE_URL,LABOUR_FORCE_SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
   const {data}=await labourForceSupabase.auth.getSession(); labourForceSession=data.session;
   updateConnectionUI(); installSaveHook();
+  localStorage.removeItem('labourforce_cloud_dirty');
   labourForceSupabase.auth.onAuthStateChange((_event,session)=>{ labourForceSession=session; updateConnectionUI(); if(session) hydrateFromBackend().then(()=>window.dispatchEvent(new CustomEvent('labourforce:ready'))); });
   if(labourForceSession){
     const {data:profile}=await labourForceSupabase.from('profiles').select('id,full_name,active,role_id,roles(name)').eq('id',labourForceSession.user.id).maybeSingle();

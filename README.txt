@@ -34,6 +34,14 @@ YOUR-ADMIN-EMAIL@example.com with the administrator's real email.
 Open index.html. The Labour Force app works locally without login. Click
 Connect to sign in and enable cloud persistence and role-based access.
 
+JTS workbook import
+-------------------
+Run supabase/jts_worker_import.sql once in the Supabase SQL Editor. Then open
+the JTS Roll Call page, import the July workbook, and click Connect. The
+authenticated sync uploads the imported workers, rates, identity, statutory,
+banking and designation fields to Supabase. Other browsers receive the same
+roster after signing in to the same Supabase project.
+
 Security
 --------
 Only the Supabase anon key belongs in frontend code. Never put a service-role
