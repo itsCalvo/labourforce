@@ -2,12 +2,15 @@
    THE LABOUR FORCE — USER & ACCESS CENTRE
    Frontend management for Supabase Auth + profiles + roles.
    Account creation is delegated to the manage-users Edge Function.
+   Performance: single-flight data loading (no duplicate queries),
+   paginated user table.
    ============================================================ */
 
 let lfUsers = [];
 let lfRoles = [];
 let lfPermissionsByRole = {};
 let lfUserReady = false;
+let lfUserLoadInFlight = null;
 
 function lfRoleLabel(name){
   return String(name||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
@@ -17,32 +20,39 @@ function lfCanManageUsers(){ return lfCurrentRoleName()==='super_admin' || lfCur
 
 async function loadUserAccessData(){
   if(!labourForceSupabase || !labourForceSession){ return false; }
-  try{
-    const [{data:roles,error:roleError},{data:profiles,error:profileError},{data:rp,error:rpError},{data:me,error:meError}] = await Promise.all([
-      labourForceSupabase.from('roles').select('id,name,description').order('name'),
-      labourForceSupabase.from('profiles').select('id,full_name,email,phone,active,created_at,updated_at,role_id,roles(id,name)').order('full_name'),
-      labourForceSupabase.from('role_permissions').select('role_id,permission_id,permissions(id,code,description)'),
-      labourForceSupabase.from('profiles').select('id,full_name,active,role_id,roles(name)').eq('id',labourForceSession.user.id).maybeSingle()
-    ]);
-    if(roleError) throw roleError;
-    if(profileError) throw profileError;
-    if(rpError) throw rpError;
-    if(meError) throw meError;
-    lfRoles=roles||[]; lfUsers=profiles||[];
-    lfPermissionsByRole={};
-    (rp||[]).forEach(x=>{
-      lfPermissionsByRole[x.role_id] ||= [];
-      if(x.permissions) lfPermissionsByRole[x.role_id].push(x.permissions);
-    });
-    window.lfCurrentRole=me?.roles?.name||'';
-    window.lfCurrentProfile=me||null;
-    lfUserReady=true;
-    return true;
-  }catch(error){
-    console.error('[Labour Force] user access load failed',error);
-    showToast(`Users could not be loaded: ${error.message||'permission denied'}`);
-    return false;
-  }
+  /* Single-flight: concurrent callers share one request set. */
+  if(lfUserLoadInFlight)return lfUserLoadInFlight;
+  lfUserLoadInFlight=(async()=>{
+    try{
+      const [{data:roles,error:roleError},{data:profiles,error:profileError},{data:rp,error:rpError},{data:me,error:meError}] = await Promise.all([
+        labourForceSupabase.from('roles').select('id,name,description').order('name'),
+        labourForceSupabase.from('profiles').select('id,full_name,email,phone,active,created_at,updated_at,role_id,roles(id,name)').order('full_name'),
+        labourForceSupabase.from('role_permissions').select('role_id,permission_id,permissions(id,code,description)'),
+        labourForceSupabase.from('profiles').select('id,full_name,active,role_id,roles(name)').eq('id',labourForceSession.user.id).maybeSingle()
+      ]);
+      if(roleError) throw roleError;
+      if(profileError) throw profileError;
+      if(rpError) throw rpError;
+      if(meError) throw meError;
+      lfRoles=roles||[]; lfUsers=profiles||[];
+      lfPermissionsByRole={};
+      (rp||[]).forEach(x=>{
+        lfPermissionsByRole[x.role_id] ||= [];
+        if(x.permissions) lfPermissionsByRole[x.role_id].push(x.permissions);
+      });
+      window.lfCurrentRole=me?.roles?.name||'';
+      window.lfCurrentProfile=me||null;
+      lfUserReady=true;
+      return true;
+    }catch(error){
+      console.error('[Labour Force] user access load failed',error);
+      showToast(`Users could not be loaded: ${error.message||'permission denied'}`);
+      return false;
+    }finally{
+      lfUserLoadInFlight=null;
+    }
+  })();
+  return lfUserLoadInFlight;
 }
 
 function renderUserRoleOptions(){
@@ -84,15 +94,18 @@ function renderUsers(){
   const cards=document.getElementById('userSummaryCards');
   if(cards)cards.innerHTML=`<div class="card"><div class="card-label">Total Users</div><div class="card-value">${lfUsers.length}</div><div class="card-sub">Labour Force accounts</div></div><div class="card"><div class="card-label">Active</div><div class="card-value">${active}</div><div class="card-sub">Can access the system</div></div><div class="card"><div class="card-label">Inactive</div><div class="card-value">${inactive}</div><div class="card-sub">Access disabled</div></div>`;
   const table=document.getElementById('usersTable'); if(!table)return;
-  table.innerHTML=rows.length?rows.map(u=>{
+  const pageRows=lfPaginate('users',rows,25);
+  table.innerHTML=pageRows.length?pageRows.map(u=>{
     const roleName=u.roles?.name||'unassigned';
     const perms=(lfPermissionsByRole[u.role_id]||[]).length;
     const self=u.id===labourForceSession?.user?.id;
     return `<tr><td><strong>${esc(u.full_name||'Unnamed')}</strong>${self?'<br><small class="muted">You</small>':''}</td><td>${esc(u.email||'—')}</td><td><span class="role-pill">${esc(lfRoleLabel(roleName))}</span></td><td><span class="status ${u.active?'status-worked':'status-missing'}">${u.active?'Active':'Inactive'}</span></td><td>${perms} permissions</td><td>${esc(formatDateTime(u.updated_at||u.created_at))}</td><td>${self?'—':`<button class="secondary" onclick="editUserAccount('${u.id}')">Manage</button>`}</td></tr>`;
   }).join(''):'<tr><td colspan="7"><div class="empty">No users found.</div></td></tr>';
+  lfRenderPager('usersPager','users','users');
 }
 
 function openUserModal(){
+  ensureModal('userModal');
   if(!lfCanManageUsers()){showToast('You do not have permission to manage users.');return;}
   document.getElementById('editingUserId').value='';
   document.getElementById('userModalTitle').textContent='Create Labour Force User';
@@ -110,6 +123,7 @@ function openUserModal(){
 }
 
 function editUserAccount(id){
+  ensureModal('userModal');
   const u=lfUsers.find(x=>x.id===id); if(!u)return;
   if(u.id===labourForceSession?.user?.id){showToast('You cannot change your own role or status here.');return;}
   document.getElementById('editingUserId').value=u.id;
@@ -166,7 +180,7 @@ async function saveUserAccount(){
 async function initUsers(){
   if(!labourForceSession||!labourForceSupabase)return;
   const ok=await loadUserAccessData();
-  if(ok)renderUsers();
+  if(ok&&lfCurrentPage==='users')renderUsers();
 }
 
 window.renderUsers=renderUsers;
@@ -175,4 +189,6 @@ window.editUserAccount=editUserAccount;
 window.saveUserAccount=saveUserAccount;
 window.initUsers=initUsers;
 window.addEventListener('labourforce:ready',initUsers);
+/* Fallback timer kept for robustness; single-flight prevents double loads. */
 setTimeout(()=>{if(labourForceSession)initUsers();},1200);
+LF_PAGER_RERENDER.users=()=>renderUsers();

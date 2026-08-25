@@ -4,3 +4,14 @@ node_modules/
 dist/ 
 *.xlsx 
 *.xls 
+*.xlsm
+
+# one-off development / repair scripts
+check_entities.js
+fix_entities.js
+fix_entities2.js
+fix_esc_line.js
+fix_esc_line2.js
+fix_newline.js
+patch_final.js
+verify_all.js

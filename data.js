@@ -17,6 +17,11 @@ let attendance=JSON.parse(localStorage.getItem("labourforce_attendance"))||{};
 let payroll=JSON.parse(localStorage.getItem("labourforce_payroll"))||{};
 let jtsState=JSON.parse(localStorage.getItem("labourforce_jts_state"))||defaultJtsState;
 let jtsDeductionRates=JSON.parse(localStorage.getItem("labourforce_jts_deduction_rates"))||{nssf:6,housing:1.5,shif:0.5,paye:10};
+
+/* Bumped on every mutation so memoized views (dashboard, payroll)
+   know when their cached computations are stale. */
+let lfDataVersion=0;
+
 function normalizeLocalMasterData(){
  const departmentMap=new Map();
  departments.forEach(d=>{const name=String(d.name||'').replace(/\s+/g,' ').trim();if(name&&!departmentMap.has(name.toLowerCase()))departmentMap.set(name.toLowerCase(),{...d,name});});
@@ -28,9 +33,30 @@ function normalizeLocalMasterData(){
  workers.forEach(w=>{const base=String(w.employeeNo||'').trim()||`WK${String(w.id).replace(/\D/g,'').slice(-6)}`;let value=base, suffix=1;while(staffNos.has(value.toLowerCase()))value=`${base}-${suffix++}`;w.employeeNo=value;staffNos.add(value.toLowerCase());});
 }
 normalizeLocalMasterData();
+
+/* Date-scoped cloud-sync tracking. Attendance mutators record the exact
+   dates they touched so the sync layer pushes only those rows instead of
+   re-uploading the entire attendance history every time. */
+const LF_ATT_DIRTY_KEY='labourforce_attendance_dirty_dates';
+function markAttendanceDirtyDate(date){
+ if(!date)return;
+ try{
+   const list=JSON.parse(localStorage.getItem(LF_ATT_DIRTY_KEY)||'[]');
+   if(!list.includes(date)){list.push(date);localStorage.setItem(LF_ATT_DIRTY_KEY,JSON.stringify(list.slice(-500)));}
+ }catch(e){/* storage unavailable - full sync flag still covers it */}
+}
+function takeAttendanceDirtyDates(){
+ try{
+   const list=JSON.parse(localStorage.getItem(LF_ATT_DIRTY_KEY)||'[]');
+   localStorage.removeItem(LF_ATT_DIRTY_KEY);
+   return Array.isArray(list)?list:[];
+ }catch(e){return[];}
+}
+
 let saveDataTimer=null;
 function saveData(){
  if(/renderDashboard|renderAttendance|renderApproval|renderJtsAttendance|renderJtsHistory|renderJtsPayroll|renderWorkers/.test(new Error().stack||''))return;
+ lfDataVersion++;
  localStorage.setItem("labourforce_jts_deduction_rates",JSON.stringify(jtsDeductionRates)); clearTimeout(saveDataTimer);
  saveDataTimer=setTimeout(()=>{localStorage.setItem("labourforce_workers",JSON.stringify(workers));localStorage.setItem("labourforce_departments",JSON.stringify(departments));localStorage.setItem("labourforce_clients",JSON.stringify(clients));localStorage.setItem("labourforce_requests",JSON.stringify(labourRequests));localStorage.setItem("labourforce_attendance",JSON.stringify(attendance));localStorage.setItem("labourforce_payroll",JSON.stringify(payroll));localStorage.setItem("labourforce_jts_state",JSON.stringify(jtsState));},150);
 }

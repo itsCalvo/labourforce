@@ -1,4 +1,9 @@
-/* Labour Force — Advanced Operations Layer */
+/* ============================================================
+   THE LABOUR FORCE — ADVANCED OPERATIONS LAYER
+   Deployments, availability, exceptions and audit UI.
+   Performance-refactored: paginated tables, no global page
+   override, targeted re-renders instead of full cascades.
+   ============================================================ */
 
 let deployments = JSON.parse(localStorage.getItem('labourforce_deployments')) || [];
 let auditLog = JSON.parse(localStorage.getItem('labourforce_audit')) || [];
@@ -59,10 +64,13 @@ function renderDeployments(){
   const sf=document.getElementById('deploymentStatusFilter')?.value||'all';
   const table=document.getElementById('deploymentsTable'); if(!table)return;
   const rows=deployments.filter(d=>(cf==='all'||String(d.clientId)===String(cf))&&(sf==='all'||d.status===sf)).sort((a,b)=>new Date(b.startDate)-new Date(a.startDate));
-  table.innerHTML=rows.length?rows.map(d=>{const w=workerById(d.workerId),c=clientById(d.clientId);return `<tr><td><strong>${esc(w?.employeeNo||'—')}</strong><br><small>${esc(w?.name||'Unknown worker')}</small></td><td>${esc(c?.name||'—')}</td><td>${esc(d.department||'—')}</td><td>${esc(d.assignment||'—')}<br><small>${esc(d.requestId?requestById(d.requestId)?.requestNo||'Request':'Direct')}</small></td><td>${esc(d.shift||'Day')}</td><td>${esc(d.startDate||'—')}</td><td>${esc(d.endDate||'—')}</td><td><span class="status ${d.status==='Active'?'status-worked':'status-missing'}">${d.status}</span></td><td>${d.status==='Active'?`<button class="danger" onclick="openEndDeployment(${d.id})">End</button>`:'—'}</td></tr>`}).join(''):'<tr><td colspan="9"><div class="empty">No deployment history found.</div></td></tr>';
+  const pageRows=lfPaginate('deployments',rows,25);
+  table.innerHTML=pageRows.length?pageRows.map(d=>{const w=workerById(d.workerId),c=clientById(d.clientId);return `<tr><td><strong>${esc(w?.employeeNo||'—')}</strong><br><small>${esc(w?.name||'Unknown worker')}</small></td><td>${esc(c?.name||'—')}</td><td>${esc(d.department||'—')}</td><td>${esc(d.assignment||'—')}<br><small>${esc(d.requestId?requestById(d.requestId)?.requestNo||'Request':'Direct')}</small></td><td>${esc(d.shift||'Day')}</td><td>${esc(d.startDate||'—')}</td><td>${esc(d.endDate||'—')}</td><td><span class="status ${d.status==='Active'?'status-worked':'status-missing'}">${d.status}</span></td><td>${d.status==='Active'?`<button class="danger" onclick="openEndDeployment(${d.id})">End</button>`:'—'}</td></tr>`}).join(''):'<tr><td colspan="9"><div class="empty">No deployment history found.</div></td></tr>';
+  lfRenderPager('deploymentsPager','deployments','deployments');
 }
 
 function openEndDeployment(id){
+  ensureModal('endDeploymentModal');
   const d=deploymentById(id);if(!d)return;
   document.getElementById('endingDeploymentId').value=id;
   document.getElementById('deploymentEndDate').value=today();
@@ -75,7 +83,7 @@ function endDeployment(){
   if(end<d.startDate){alert('End date cannot be before the start date.');return;}
   d.endDate=end;d.status='Ended';d.reason=document.getElementById('deploymentEndReason').value.trim()||'Assignment ended';
   syncWorkerDeployment(d.workerId);saveData();saveAdvanced();audit('Deployment ended',workerById(d.workerId)?.employeeNo||'Worker',`${clientById(d.clientId)?.name||'Client'} — ${d.reason}`);
-  closeModal('endDeploymentModal');renderDeployments();renderWorkers();renderAvailability();renderDashboard();showToast('Deployment ended. Worker is now available.');
+  closeModal('endDeploymentModal');renderDeployments();rerenderIfActive('workers');rerenderIfActive('availability');rerenderIfActive('dashboard');showToast('Deployment ended. Worker is now available.');
 }
 
 function renderAvailability(){
@@ -91,7 +99,9 @@ function renderAvailability(){
   }
   const table=document.getElementById('availabilityTable');if(!table)return;
   const rows=available.filter(w=>(cls==='all'||w.classification===cls)&&(dept==='all'||w.department===dept));
-  table.innerHTML=rows.length?rows.map(w=>{const a=getAttendance(today(),w.id);return `<tr><td><strong>${esc(w.employeeNo)}</strong></td><td>${esc(w.name)}</td><td>${esc(w.department)}</td><td>${esc(w.classification)}</td><td><span class="status ${a.status==='worked'?'status-worked':a.status==='absent'?'status-absent':'status-missing'}">${a.status==='worked'?'Worked':a.status==='absent'?'Absent':'Missing'}</span></td><td><span class="status status-worked">Available</span></td><td><button class="primary" onclick="openDeploymentModal(${w.id})">Deploy</button></td></tr>`}).join(''):'<tr><td colspan="7"><div class="empty">No available workers match these filters.</div></td></tr>';
+  const pageRows=lfPaginate('availability',rows,25);
+  table.innerHTML=pageRows.length?pageRows.map(w=>{const a=peekAttendance(today(),w.id);return `<tr><td><strong>${esc(w.employeeNo)}</strong></td><td>${esc(w.name)}</td><td>${esc(w.department)}</td><td>${esc(w.classification)}</td><td><span class="status ${a.status==='worked'||a.status==='present'?'status-worked':a.status==='absent'?'status-absent':'status-missing'}">${a.status==='worked'||a.status==='present'?'Worked':a.status==='absent'?'Absent':'Missing'}</span></td><td><span class="status status-worked">Available</span></td><td><button class="primary" onclick="openDeploymentModal(${w.id})">Deploy</button></td></tr>`}).join(''):'<tr><td colspan="7"><div class="empty">No available workers match these filters.</div></td></tr>';
+  lfRenderPager('availabilityPager','availability','workers');
 }
 function openAvailableDeployment(){
   const w=workers.find(x=>x.active&&!activeDeployment(x.id));
@@ -103,13 +113,13 @@ function requestShortage(r){return Math.max(0,Number(r.workersRequired||0)-(r.al
 function renderExceptions(){
   const list=[];const date=today();
   const active=workers.filter(w=>w.active);
-  const missing=active.filter(w=>getAttendance(date,w.id).status==='pending');
+  const missing=active.filter(w=>peekAttendance(date,w.id).status==='pending');
   if(missing.length)list.push({severity:'High',type:'Missing attendance',details:`${missing.length} active worker(s) have no attendance for ${date}.`,action:`showPage('attendance')`});
-  const overtime=active.filter(w=>(Number(getAttendance(date,w.id).overtime)||0)>4);
+  const overtime=active.filter(w=>(Number(peekAttendance(date,w.id).overtime)||0)>4);
   if(overtime.length)list.push({severity:'Medium',type:'Excessive overtime',details:`${overtime.length} worker(s) have more than 4 overtime hours today.`,action:`showPage('attendance')`});
   const overdue=labourRequests.filter(r=>r.status!=='Completed'&&r.status!=='Cancelled'&&requestShortage(r)>0&&r.startDate<date);
   if(overdue.length)list.push({severity:'High',type:'Overdue labour requests',details:`${overdue.length} request(s) started without full allocation.`,action:`showPage('requests')`});
-  const unassignedAttendance=active.filter(w=>!activeDeployment(w.id)&&getAttendance(date,w.id).status==='worked');
+  const unassignedAttendance=active.filter(w=>!activeDeployment(w.id)&&['worked','present'].includes(peekAttendance(date,w.id).status));
   if(unassignedAttendance.length)list.push({severity:'Medium',type:'Worked without deployment',details:`${unassignedAttendance.length} worker(s) are marked worked but have no active client deployment.`,action:`showPage('workers')`});
   const inactiveClients=deployments.filter(d=>d.status==='Active'&&!clientById(d.clientId)?.active);
   if(inactiveClients.length)list.push({severity:'High',type:'Inactive client assignment',details:`${inactiveClients.length} active deployment(s) belong to inactive clients.`,action:`showPage('clients')`});
@@ -122,7 +132,9 @@ function renderExceptions(){
 
 function renderAudit(){
   const table=document.getElementById('auditTable');if(!table)return;
-  table.innerHTML=auditLog.length?auditLog.slice(0,100).map(x=>`<tr><td>${formatDateTime(x.time)}</td><td><strong>${esc(x.action)}</strong></td><td>${esc(x.reference||'—')}</td><td>${esc(x.details||'—')}</td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">No audit activity recorded yet.</div></td></tr>';
+  const rows=lfPaginate('audit',auditLog,50);
+  table.innerHTML=rows.length?rows.map(x=>`<tr><td>${formatDateTime(x.time)}</td><td><strong>${esc(x.action)}</strong></td><td>${esc(x.reference||'—')}</td><td>${esc(x.details||'—')}</td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">No audit activity recorded yet.</div></td></tr>';
+  lfRenderPager('auditPager','audit','entries');
 }
 
 /* Override deployment saving so every assignment has history. */
@@ -134,7 +146,7 @@ window.saveDeployment=function(){
   deployments.push(d);syncWorkerDeployment(id);
   if(requestId){const r=requestById(requestId);if(r&&!r.allocatedWorkerIds.includes(id))r.allocatedWorkerIds.push(id);if(r&&r.allocatedWorkerIds.length)r.status='Allocated'}
   saveData();saveAdvanced();audit('Worker deployed',w.employeeNo,`${clientById(clientId)?.name||'Client'} — ${d.assignment}`);
-  closeModal('deploymentModal');renderWorkers();renderRequests();renderDeployments();renderAvailability();renderDashboard();showToast(`${w.employeeNo} deployed successfully.`);
+  closeModal('deploymentModal');renderWorkers();rerenderIfActive('deployments');rerenderIfActive('availability');rerenderIfActive('dashboard');showToast(`${w.employeeNo} deployed successfully.`);
 };
 
 /* Allocation now creates deployment history too. */
@@ -150,17 +162,7 @@ window.saveAllocation=function(){
   });
   previous.filter(id=>!ids.includes(id)).forEach(id=>{const d=activeDeployment(id);if(d&&d.requestId===r.id){d.status='Ended';d.endDate=today();d.reason='Removed from request allocation';syncWorkerDeployment(id)}});
   saveData();saveAdvanced();audit('Workers allocated',r.requestNo,`${ids.length} worker(s) allocated to ${clientById(r.clientId)?.name||'client'}`);
-  closeModal('allocationModal');renderRequests();renderWorkers();renderDeployments();renderAvailability();renderDashboard();showToast(`${ids.length} worker(s) allocated to ${r.requestNo}.`);
-};
-
-/* Enhanced navigation. */
-window.showPage=function(id,button){
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  const page=document.getElementById(id);if(page)page.classList.add('active');
-  document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));if(button)button.classList.add('active');
-  const titles={dashboard:'Executive Dashboard',requests:'Labour Requests',deployments:'Worker Deployments',availability:'Workforce Availability',exceptions:'Exception Centre',attendance:'Daily Attendance',approval:'Supervisor Approval',workers:'Workers',clients:'Clients / Mother Companies',departments:'Departments',payroll:'Payroll',reports:'Reports',audit:'Audit Trail'};
-  document.getElementById('pageTitle').textContent=titles[id]||id;
-  if(id==='dashboard')renderDashboard();if(id==='requests')renderRequests();if(id==='deployments')renderDeployments();if(id==='availability')renderAvailability();if(id==='exceptions')renderExceptions();if(id==='attendance')renderAttendance();if(id==='approval')renderApproval();if(id==='workers')renderWorkers();if(id==='clients')renderClients();if(id==='departments')renderDepartments();if(id==='payroll')renderPayroll();if(id==='reports')renderReports();if(id==='audit')renderAudit();
+  closeModal('allocationModal');renderRequests();rerenderIfActive('workers');rerenderIfActive('deployments');rerenderIfActive('availability');rerenderIfActive('dashboard');showToast(`${ids.length} worker(s) allocated to ${r.requestNo}.`);
 };
 
 /* Dashboard management strip. */
@@ -179,11 +181,14 @@ function renderAdvancedDashboard(){
 const originalRenderDashboard=window.renderDashboard;
 window.renderDashboard=function(){originalRenderDashboard();renderAdvancedDashboard();};
 
-/* Audit important existing actions without changing their behavior. */
+/* Audit important existing actions without changing their behavior.
+   The Audit Trail page re-renders when opened, so no DOM work here. */
 function wrapAudit(name,label){
   const original=window[name];if(typeof original!=='function')return;
-  window[name]=function(...args){const result=original.apply(this,args);audit(label,'System','Action completed');renderAudit();return result;};
+  window[name]=function(...args){const result=original.apply(this,args);audit(label,'System','Action completed');return result;};
 }
 ['approveRequest','cancelRequest','completeRequest','saveClient','toggleClient','saveWorker','toggleWorker','approveAttendance','calculatePayroll'].forEach((n,i)=>wrapAudit(n,['Labour request approved','Labour request cancelled','Labour request completed','Client saved','Client status changed','Worker saved','Worker status changed','Attendance approved','Payroll calculated'][i]));
 
-populateAdvancedFilters();renderDeployments();renderAvailability();renderExceptions();renderAudit();renderAdvancedDashboard();saveAdvanced();
+LF_PAGER_RERENDER.deployments=()=>renderDeployments();
+LF_PAGER_RERENDER.availability=()=>renderAvailability();
+LF_PAGER_RERENDER.audit=()=>renderAudit();
