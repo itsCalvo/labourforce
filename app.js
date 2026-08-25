@@ -8,6 +8,23 @@
    ============================================================ */
 
 function today(){return new Date().toISOString().split("T")[0]}
+/* Collapsible nav groups: persist collapsed state per group. */
+function toggleNavGroup(group){
+ const el=document.querySelector(`.nav-group[data-group="${group}"]`);
+ if(!el)return;
+ el.classList.toggle('collapsed');
+ const collapsed=el.classList.contains('collapsed');
+ try{const state=JSON.parse(localStorage.getItem('labourforce_nav_collapsed')||'{}');state[group]=collapsed;localStorage.setItem('labourforce_nav_collapsed',JSON.stringify(state));}catch(e){}
+}
+function initNavGroups(){
+ try{
+  const state=JSON.parse(localStorage.getItem('labourforce_nav_collapsed')||'{}');
+  Object.entries(state).forEach(([group,collapsed])=>{
+   if(collapsed){const el=document.querySelector(`.nav-group[data-group="${group}"]`);if(el)el.classList.add('collapsed');}
+  });
+ }catch(e){}
+}
+window.toggleNavGroup=toggleNavGroup;
 function money(value){return `KSh ${Number(value||0).toLocaleString()}`}
 function toggleCompactView(){document.body.classList.toggle('compact-view');localStorage.setItem('labourforce_compact_view',document.body.classList.contains('compact-view')?'1':'0')}
 if(localStorage.getItem('labourforce_compact_view')==='1')document.body.classList.add('compact-view');
@@ -88,7 +105,7 @@ const LF_PAGE_RENDER={
 /* Heavy containers cleared when leaving a page so hidden pages cost nothing. */
 const LF_PAGE_CLEAR={
  dashboard:['dashboardDesignationGroups','dashboardAttendance','dashboardRequestsTable','dashboardAttendancePager'],
- requests:['requestsTable','requestsPager'],
+ requests:['requestsSummary','requestsTable','requestsPager'],
  attendance:['attendanceTable','attendancePager'],
  approval:['approvalTable','approvalPager'],
  'jts':['jtsSummary','jtsAttendanceTable','jtsAttendancePager'],
@@ -96,11 +113,11 @@ const LF_PAGE_CLEAR={
  'jts-payroll':['jtsPayrollSummary','jtsPayrollTable','jtsPayrollPager'],
  supervisor:['supervisorSummary','supervisorSearchResults','supervisorTable','supervisorPager'],
  'worker-portal':['workerPortalSummary','workerPortalTable','workerPortalPager'],
- workers:['workersTable','workersPager'],
+ workers:['workersSummary','workersTable','workersPager'],
  clients:['clientsTable'],
  departments:['departmentsTable'],
  payroll:['payrollTable','payrollPager'],
- deployments:['deploymentsTable','deploymentsPager'],
+ deployments:['deploymentsSummary','deploymentsTable','deploymentsPager'],
  availability:['availabilityCards','availabilityTable','availabilityPager'],
  exceptions:['exceptionCards','exceptionsTable'],
  audit:['auditTable','auditPager'],
@@ -117,6 +134,15 @@ function showPage(id,button){
  else{const nav=[...document.querySelectorAll('.nav button')].find(b=>(b.getAttribute('onclick')||'').includes(`'${id}'`));if(nav)nav.classList.add('active');}
  document.getElementById('pageTitle').textContent=LF_PAGE_TITLES[id]||id;
  lfCurrentPage=id;
+ /* Auto-collapse other nav groups: only the group containing the active page stays expanded. */
+ const activeBtn=button||[...document.querySelectorAll('.nav button')].find(b=>(b.getAttribute('onclick')||'').includes(`'${id}'`));
+ if(activeBtn){
+   const activeGroup=activeBtn.closest('.nav-group');
+   document.querySelectorAll('.nav-group').forEach(g=>{
+     if(g!==activeGroup)g.classList.add('collapsed');
+     else g.classList.remove('collapsed');
+   });
+ }
  try{const r=LF_PAGE_RENDER[id];if(typeof r==='function')r();}catch(error){console.error('[Labour Force] render failed for '+id,error);}
 }
 window.showPage=showPage;
@@ -169,6 +195,15 @@ function renderRequests(){
  const filterEl=document.getElementById("requestStatusFilter");if(!filterEl)return;
  const filter=filterEl.value;const table=document.getElementById("requestsTable");if(!table)return;
  const rows=labourRequests.filter(r=>filter==="all"||r.status===filter);
+ /* Summary cards: aggregate request counts. */
+ const summary=document.getElementById("requestsSummary");
+ if(summary){
+   const pending=labourRequests.filter(r=>r.status==="Pending").length;
+   const approved=labourRequests.filter(r=>r.status==="Approved").length;
+   const allocated=labourRequests.filter(r=>r.status==="Allocated").length;
+   const completed=labourRequests.filter(r=>r.status==="Completed").length;
+   summary.innerHTML=`<div class="summary-card"><strong>${labourRequests.length}</strong><span>Total requests</span></div><div class="summary-card"><strong>${pending}</strong><span>Pending</span></div><div class="summary-card"><strong>${approved+allocated}</strong><span>Approved/Allocated</span></div><div class="summary-card"><strong>${completed}</strong><span>Completed</span></div>`;
+ }
  const pageRows=lfPaginate('requests',rows,20);
  table.innerHTML=pageRows.length?pageRows.map(r=>{
    const c=clientById(r.clientId);const allocated=r.allocatedWorkerIds?.length||0;
@@ -299,6 +334,15 @@ function renderWorkersBulk(){
  const rows=visibleWorkers();
  const pageRows=lfPaginate('workers',rows,25);
  const selected=new Set([...document.querySelectorAll(".worker-select:checked")].map(input=>Number(input.value)));
+ /* Summary cards: aggregate counts instead of listing every name. */
+ const summary=document.getElementById("workersSummary");
+ if(summary){
+   const active=workers.filter(w=>w.active).length;
+   const deployed=workers.filter(w=>w.active&&w.client).length;
+   const available=workers.filter(w=>w.active&&!w.client).length;
+   const depts=new Set(workers.filter(w=>w.active).map(w=>w.department).filter(Boolean)).size;
+   summary.innerHTML=`<div class="summary-card"><strong>${active}</strong><span>Active workers</span></div><div class="summary-card"><strong>${deployed}</strong><span>Deployed</span></div><div class="summary-card"><strong>${available}</strong><span>Available</span></div><div class="summary-card"><strong>${depts}</strong><span>Departments</span></div>`;
+ }
  table.innerHTML=pageRows.length?pageRows.map(w=>{
    const deployment=w.client?`${esc(w.client)}<br><small class="muted">${esc(w.assignment||"")}</small>`:'<span class="muted">Unassigned</span>';
    const editBtn=canManageWorkerMasterData()?`<button class="secondary" onclick="editWorker(${w.id})">Edit</button>`:`<button class="secondary" onclick="reportJtsCorrection(${w.id})">Request change</button>`;
@@ -309,7 +353,7 @@ function renderWorkersBulk(){
 }
 function updateWorkerSelection(){const selected=document.querySelectorAll(".worker-select:checked").length,count=document.getElementById("workerSelectionCount");if(count)count.textContent=`${selected} selected`;}
 function toggleAllWorkers(checked){document.querySelectorAll(".worker-select").forEach(input=>input.checked=checked);updateWorkerSelection();}
-function applyWorkerBulkAction(){if(!canManageWorkerMasterData()){showToast("Only accountant / HR can apply worker changes.");return;}const ids=[...document.querySelectorAll(".worker-select:checked")].map(input=>Number(input.value)),action=document.getElementById("workerBulkAction")?.value;if(!ids.length){showToast("Select at least one worker.");return;}if(!action){showToast("Choose a bulk action first.");return;}let value;if(action==='department'){value=prompt(`Move ${ids.length} worker(s) to which department?`,departments[0]?.name||'');if(value===null)return;value=value.trim();if(!departments.some(d=>d.name.toLowerCase()===value.toLowerCase())){showToast("Department not found. Add it first.");return;}ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w)w.department=value;});}else if(action==='designation'){value=prompt(`Assign which designation to ${ids.length} worker(s)?`,"");if(value===null||!value.trim())return;ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w)w.designation=value.trim();});}else if(action==='rates'){const rate=prompt('Daily rate (KSh):','');if(rate===null)return;const otRate=prompt('OT hourly rate (KSh):','');if(otRate===null)return;if(Number(rate)<=0||Number(otRate)<=0){showToast('Rates must be greater than zero.');return;}ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w){w.rate=Number(rate);w.otRate=Number(otRate);}});}else ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w)w.active=action==='activate';});saveData();renderWorkers();showToast(`Updated ${ids.length} worker(s).`);}
+function applyWorkerBulkAction(){if(!canManageWorkerMasterData()){showToast("Only accountant / HR can apply worker changes.");return;}const ids=[...document.querySelectorAll(".worker-select:checked")].map(input=>Number(input.value)),action=document.getElementById("workerBulkAction")?.value;if(!ids.length){showToast("Select at least one worker.");return;}if(!action){showToast("Choose a bulk action first.");return;}let value;if(action==='delete'){if(!confirm(`Delete ${ids.length} worker(s) permanently? This removes their attendance history too.`))return;const idSet=new Set(ids);workers=workers.filter(w=>!idSet.has(Number(w.id)));Object.keys(attendance).forEach(date=>{const day=attendance[date];if(day&&day.records){ids.forEach(id=>{delete day.records[id];});}});if(typeof deployments==='object'&&Array.isArray(deployments))deployments=deployments.filter(d=>!idSet.has(Number(d.workerId)));saveData();if(typeof saveAdvanced==='function')saveAdvanced();renderWorkers();showToast(`Deleted ${ids.length} worker(s).`);return;}if(action==='department'){value=prompt(`Move ${ids.length} worker(s) to which department?`,departments[0]?.name||'');if(value===null)return;value=value.trim();if(!departments.some(d=>d.name.toLowerCase()===value.toLowerCase())){showToast("Department not found. Add it first.");return;}ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w)w.department=value;});}else if(action==='designation'){value=prompt(`Assign which designation to ${ids.length} worker(s)?`,"");if(value===null||!value.trim())return;ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w)w.designation=value.trim();});}else if(action==='rates'){const rate=prompt('Daily rate (KSh):','');if(rate===null)return;const otRate=prompt('OT hourly rate (KSh):','');if(otRate===null)return;if(Number(rate)<=0||Number(otRate)<=0){showToast('Rates must be greater than zero.');return;}ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w){w.rate=Number(rate);w.otRate=Number(otRate);}});}else ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w)w.active=action==='activate';});saveData();renderWorkers();showToast(`Updated ${ids.length} worker(s).`);}
 function openWorkerModal(){ensureModal('workerModal');if(!canManageWorkerMasterData()){showToast("Only accountant / HR can edit worker master data.");return;}document.getElementById("editingWorkerId").value="";document.getElementById("workerModalTitle").textContent="Add Worker";populateFilters();document.getElementById("workerNo").value=employeeNo();document.getElementById("workerName").value="";document.getElementById("workerIdNumber").value="";document.getElementById("workerDesignation").value="";document.getElementById("workerPhone").value="";document.getElementById("workerRate").value="";document.getElementById("workerOtRate").value="";document.getElementById("workerJoinDate").value=today();document.getElementById("workerModal").classList.add("show")}
 function editWorker(id){ensureModal('workerModal');if(!canManageWorkerMasterData()){showToast("Only accountant / HR can edit worker master data.");return;}const w=workers.find(x=>x.id===id);if(!w)return;openWorkerModal();document.getElementById("editingWorkerId").value=id;document.getElementById("workerModalTitle").textContent="Edit Worker";document.getElementById("workerNo").value=w.employeeNo;document.getElementById("workerName").value=w.name;document.getElementById("workerIdNumber").value=w.idNumber||"";document.getElementById("workerDesignation").value=w.designation||"";document.getElementById("workerPhone").value=w.phone||"";document.getElementById("workerDepartment").value=w.department;document.getElementById("workerClassification").value=w.classification;document.getElementById("workerRate").value=w.rate;document.getElementById("workerOtRate").value=w.otRate;document.getElementById("workerJoinDate").value=w.joinDate||today()}
 function saveWorker(){if(!canManageWorkerMasterData()){showToast("Only accountant / HR can edit worker master data.");return;}const id=document.getElementById("editingWorkerId").value,name=document.getElementById("workerName").value.trim(),department=document.getElementById("workerDepartment").value,designation=document.getElementById("workerDesignation").value.trim(),idNumber=document.getElementById("workerIdNumber").value.trim(),phone=document.getElementById("workerPhone").value.trim(),classification=document.getElementById("workerClassification").value,rate=Number(document.getElementById("workerRate").value),otRate=Number(document.getElementById("workerOtRate").value),joinDate=document.getElementById("workerJoinDate").value;if(!name||!department||!classification||rate<=0||otRate<=0){alert("Complete all worker details.");return}if(id){const w=workers.find(x=>x.id===Number(id));if(!w)return;Object.assign(w,{name,department,designation,idNumber,phone,classification,rate,otRate,joinDate});showToast("Worker updated successfully.")}else{const employeeNo=document.getElementById("workerNo").value;workers.push({id:Date.now(),employeeNo,idNumber,designation,phone,name,department,classification,rate,otRate,joinDate,active:true,client:"",assignment:"",deploymentStart:""});showToast(`${employeeNo} created successfully.`)}saveData();closeModal("workerModal");renderWorkers()}
@@ -575,6 +619,7 @@ LF_PAGER_RERENDER.payroll=()=>renderPayroll();
    Only the shell + dashboard initialise. Every other module renders
    the first time the user navigates to it. */
 (function initShell(){
+ initNavGroups();
  const setVal=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v;};
  setVal('dashboardDate',today());setVal('attendanceDate',today());setVal('approvalDate',today());
  setVal('jtsDate',today());setVal('supervisorDate',today());

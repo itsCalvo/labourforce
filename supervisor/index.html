@@ -46,34 +46,14 @@
 </head>
 <body>
 
-<!-- AUTH GATE -->
-<div id="authView" class="auth-wrap" hidden>
-  <div class="lf-login-card">
-    <div class="lf-login-brand">THE <span>LABOUR FORCE</span></div>
-    <h2>Supervisor sign-in</h2>
-    <p>Attendance capture for authorised supervisors. Uses your Labour Force account.</p>
-    <label>Email</label><input id="supEmail" type="email" autocomplete="username" inputmode="email">
-    <label>Password</label><input id="supPassword" type="password" autocomplete="current-password">
-    <div id="supLoginError" class="lf-login-error"></div>
-    <div class="lf-login-actions"><button class="primary" id="supDoLogin">Sign in</button></div>
-  </div>
-</div>
-
-<!-- DENIED -->
-<div id="deniedView" class="denied" hidden>
-  <h2>Not authorised</h2>
-  <p id="deniedMessage">This account does not have supervisor access. Contact your administrator to be assigned a supervisor role or a department assignment.</p>
-  <button class="secondary" id="deniedSignOut" style="margin-top:16px">Sign out</button>
-</div>
-
-<!-- APP -->
-<main id="appView" class="sup-page" hidden>
+<!-- APP (open access — login will be added later) -->
+<main id="appView" class="sup-page">
   <header class="sup-head">
     <div>
       <h1>Supervisor Attendance</h1>
       <p id="scopeLabel">Attendance only · no payroll data</p>
     </div>
-    <div class="sup-user"><div><strong id="supUserName">—</strong><span id="supUserRole"></span></div><button class="secondary" id="supSignOut">Sign out</button></div>
+    <div class="sup-user"><div><strong id="supUserName">Supervisor</strong><span id="supUserRole">open access</span></div></div>
   </header>
 
   <section class="section" style="margin-top:16px">

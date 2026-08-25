@@ -28,3 +28,18 @@
 .lf-pager button{padding:6px 12px;font-size:12px}
 .lf-pager button:disabled{opacity:.4;cursor:not-allowed}
 .status-verified{background:rgba(50,166,115,.15);color:#a8f0c5;border:1px solid rgba(50,166,115,.4)}
+
+/* ============================================================
+   COLLAPSIBLE NAV GROUPS
+   ============================================================ */
+.nav-group{margin-bottom:6px}
+.nav-group-toggle{width:100%;background:transparent;border:0;color:#94a3b8;padding:10px 12px;border-radius:8px;text-align:left;cursor:pointer;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.nav-group-toggle:hover{color:#fff;background:rgba(255,255,255,.05)}
+.nav-group-arrow{display:inline-block;transition:transform .2s;font-size:10px;color:#64748b}
+.nav-group.collapsed .nav-group-arrow{transform:rotate(-90deg)}
+.nav-group.collapsed .nav-group-items{display:none}
+.nav-group-items{padding-left:4px}
+.nav-group-items button{padding:10px 12px;font-size:13px}
+.nav-group-items button .nav-icon{width:22px;font-size:14px}
+@media(max-width:750px){.nav-group-toggle{font-size:0;justify-content:center;padding:10px 5px}.nav-group-toggle .nav-group-arrow{font-size:14px}.nav-group-items{padding-left:0}}
+@media(max-width:600px){.nav-group{display:contents}.nav-group-toggle{display:none}.nav-group-items{display:contents}.nav-group.collapsed .nav-group-items{display:contents}}

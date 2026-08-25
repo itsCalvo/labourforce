@@ -64,6 +64,14 @@ function renderDeployments(){
   const sf=document.getElementById('deploymentStatusFilter')?.value||'all';
   const table=document.getElementById('deploymentsTable'); if(!table)return;
   const rows=deployments.filter(d=>(cf==='all'||String(d.clientId)===String(cf))&&(sf==='all'||d.status===sf)).sort((a,b)=>new Date(b.startDate)-new Date(a.startDate));
+  /* Summary cards: aggregate deployment counts. */
+  const summary=document.getElementById('deploymentsSummary');
+  if(summary){
+    const active=deployments.filter(d=>d.status==='Active').length;
+    const ended=deployments.filter(d=>d.status==='Ended').length;
+    const clients=new Set(deployments.filter(d=>d.status==='Active').map(d=>d.clientId).filter(Boolean)).size;
+    summary.innerHTML=`<div class="summary-card"><strong>${deployments.length}</strong><span>Total deployments</span></div><div class="summary-card"><strong>${active}</strong><span>Active</span></div><div class="summary-card"><strong>${ended}</strong><span>Ended</span></div><div class="summary-card"><strong>${clients}</strong><span>Active clients</span></div>`;
+  }
   const pageRows=lfPaginate('deployments',rows,25);
   table.innerHTML=pageRows.length?pageRows.map(d=>{const w=workerById(d.workerId),c=clientById(d.clientId);return `<tr><td><strong>${esc(w?.employeeNo||'—')}</strong><br><small>${esc(w?.name||'Unknown worker')}</small></td><td>${esc(c?.name||'—')}</td><td>${esc(d.department||'—')}</td><td>${esc(d.assignment||'—')}<br><small>${esc(d.requestId?requestById(d.requestId)?.requestNo||'Request':'Direct')}</small></td><td>${esc(d.shift||'Day')}</td><td>${esc(d.startDate||'—')}</td><td>${esc(d.endDate||'—')}</td><td><span class="status ${d.status==='Active'?'status-worked':'status-missing'}">${d.status}</span></td><td>${d.status==='Active'?`<button class="danger" onclick="openEndDeployment(${d.id})">End</button>`:'—'}</td></tr>`}).join(''):'<tr><td colspan="9"><div class="empty">No deployment history found.</div></td></tr>';
   lfRenderPager('deploymentsPager','deployments','deployments');

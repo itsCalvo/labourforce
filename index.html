@@ -10,26 +10,51 @@
 <div class="app">
 <aside class="sidebar">
     <div class="logo">Labour <span>Force</span></div>
-    <nav class="nav">
-        <button class="active" onclick="showPage('dashboard', this)"><span class="nav-icon">📊</span>Dashboard</button>
-        <button onclick="showPage('requests', this)"><span class="nav-icon">📋</span>Labour Requests</button>
-<button onclick="showPage('deployments', this)"><span class="nav-icon">🔄</span>Deployments</button>
-<button onclick="showPage('availability', this)"><span class="nav-icon">🟢</span>Availability</button>
-<button onclick="showPage('exceptions', this)"><span class="nav-icon">🚨</span>Exceptions</button>
-        <button onclick="showPage('attendance', this)"><span class="nav-icon">📝</span>Attendance</button>
-        <button onclick="showPage('jts', this)"><span class="nav-icon">🟢</span>JTS Roll Call</button>
-        <button onclick="showPage('jts-history', this)"><span class="nav-icon">📜</span>JTS History</button>
-        <button onclick="showPage('jts-payroll', this)"><span class="nav-icon">💸</span>JTS Payroll</button>
-        <button onclick="showPage('supervisor', this)"><span class="nav-icon">🛡️</span>Supervisor Portal</button>
-        <button onclick="showPage('worker-portal', this)"><span class="nav-icon">🧑</span>My Attendance</button>
-        <button onclick="showPage('approval', this)"><span class="nav-icon">✓</span>Approval</button>
-        <button onclick="showPage('workers', this)"><span class="nav-icon">👥</span>Workers</button>
-        <button onclick="showPage('clients', this)"><span class="nav-icon">🏭</span>Clients</button>
-        <button onclick="showPage('departments', this)"><span class="nav-icon">🏢</span>Departments</button>
-        <button onclick="showPage('payroll', this)"><span class="nav-icon">💰</span>Payroll</button>
-        <button onclick="showPage('reports', this)"><span class="nav-icon">📄</span>Reports</button>
-        <button onclick="showPage('users', this)" data-permission="users.manage"><span class="nav-icon">🛡️</span>Users & Access</button>
-<button onclick="showPage('audit', this)"><span class="nav-icon">🧾</span>Audit Trail</button>
+    <nav class="nav" id="mainNav">
+        <div class="nav-group" data-group="overview">
+            <button class="nav-group-toggle" onclick="toggleNavGroup('overview')"><span class="nav-group-arrow">▾</span>Overview</button>
+            <div class="nav-group-items">
+                <button class="active" onclick="showPage('dashboard', this)"><span class="nav-icon">📊</span>Dashboard</button>
+                <button onclick="showPage('reports', this)"><span class="nav-icon">📄</span>Reports</button>
+            </div>
+        </div>
+        <div class="nav-group" data-group="operations">
+            <button class="nav-group-toggle" onclick="toggleNavGroup('operations')"><span class="nav-group-arrow">▾</span>Operations</button>
+            <div class="nav-group-items">
+                <button onclick="showPage('requests', this)"><span class="nav-icon">📋</span>Labour Requests</button>
+                <button onclick="showPage('deployments', this)"><span class="nav-icon">🔄</span>Deployments</button>
+                <button onclick="showPage('availability', this)"><span class="nav-icon">🟢</span>Availability</button>
+                <button onclick="showPage('exceptions', this)"><span class="nav-icon">🚨</span>Exceptions</button>
+                <button onclick="showPage('attendance', this)"><span class="nav-icon">📝</span>Attendance</button>
+            </div>
+        </div>
+        <div class="nav-group" data-group="jts">
+            <button class="nav-group-toggle" onclick="toggleNavGroup('jts')"><span class="nav-group-arrow">▾</span>JTS</button>
+            <div class="nav-group-items">
+                <button onclick="showPage('jts', this)"><span class="nav-icon">🟢</span>JTS Roll Call</button>
+                <button onclick="showPage('jts-history', this)"><span class="nav-icon">📜</span>JTS History</button>
+                <button onclick="showPage('jts-payroll', this)"><span class="nav-icon">💸</span>JTS Payroll</button>
+            </div>
+        </div>
+        <div class="nav-group" data-group="people">
+            <button class="nav-group-toggle" onclick="toggleNavGroup('people')"><span class="nav-group-arrow">▾</span>People</button>
+            <div class="nav-group-items">
+                <button onclick="showPage('workers', this)"><span class="nav-icon">👥</span>Workers</button>
+                <button onclick="showPage('supervisor', this)"><span class="nav-icon">🛡️</span>Supervisor Portal</button>
+                <button onclick="showPage('worker-portal', this)"><span class="nav-icon">🧑</span>My Attendance</button>
+                <button onclick="showPage('approval', this)"><span class="nav-icon">✓</span>Approval</button>
+            </div>
+        </div>
+        <div class="nav-group" data-group="admin">
+            <button class="nav-group-toggle" onclick="toggleNavGroup('admin')"><span class="nav-group-arrow">▾</span>Administration</button>
+            <div class="nav-group-items">
+                <button onclick="showPage('clients', this)"><span class="nav-icon">🏭</span>Clients</button>
+                <button onclick="showPage('departments', this)"><span class="nav-icon">🏢</span>Departments</button>
+                <button onclick="showPage('payroll', this)"><span class="nav-icon">💰</span>Payroll</button>
+                <button onclick="showPage('users', this)" data-permission="users.manage"><span class="nav-icon">🛡️</span>Users & Access</button>
+                <button onclick="showPage('audit', this)"><span class="nav-icon">🧾</span>Audit Trail</button>
+            </div>
+        </div>
     </nav>
 </aside>
 
@@ -59,6 +84,7 @@
 <section id="requests" class="page">
 <div class="section">
     <div class="section-header"><h2>Labour Requests</h2><div class="controls"><select id="requestStatusFilter" onchange="renderRequests()"><option value="all">All Statuses</option><option>Pending</option><option>Approved</option><option>Allocated</option><option>Completed</option><option>Cancelled</option></select><button class="primary" onclick="openRequestModal()">+ New Labour Request</button></div></div>
+    <div class="jts-summary" id="requestsSummary"></div>
     <div class="request-note">Requests are optional. Workers can still be deployed directly when no client request exists.</div>
     <div class="table-container"><table><thead><tr><th>Request</th><th>Client</th><th>Department</th><th>Classification</th><th>Workers</th><th>Start</th><th>Duration</th><th>Status</th><th>Actions</th></tr></thead><tbody id="requestsTable"></tbody></table></div>
     <div class="lf-pager" id="requestsPager"></div>
@@ -119,7 +145,8 @@
 <section id="workers" class="page">
 <div class="section">
     <div class="section-header"><h2>Workers</h2><div class="controls"><input type="search" id="workerSearch" placeholder="Search worker..." autocomplete="off"><select id="workerDepartmentFilter" onchange="renderWorkers()"></select><button class="primary" onclick="openWorkerModal()">+ Add Worker</button></div></div>
-    <div class="controls" style="margin: 12px 0;"><label><input type="checkbox" id="selectAllWorkers" onchange="toggleAllWorkers(this.checked)"> Select all visible</label><select id="workerBulkAction"><option value="">Choose bulk action</option><option value="activate">Activate selected</option><option value="deactivate">Deactivate selected</option><option value="department">Move to department</option><option value="designation">Assign designation</option><option value="rates">Change rates</option></select><button class="secondary" onclick="applyWorkerBulkAction()">Apply to selected</button><span id="workerSelectionCount" class="muted">0 selected</span></div>
+    <div class="jts-summary" id="workersSummary"></div>
+    <div class="controls" style="margin: 12px 0;"><label><input type="checkbox" id="selectAllWorkers" onchange="toggleAllWorkers(this.checked)"> Select all visible</label><select id="workerBulkAction"><option value="">Choose bulk action</option><option value="activate">Activate selected</option><option value="deactivate">Deactivate selected</option><option value="department">Move to department</option><option value="designation">Assign designation</option><option value="rates">Change rates</option><option value="delete">Delete selected</option></select><button class="secondary" onclick="applyWorkerBulkAction()">Apply to selected</button><span id="workerSelectionCount" class="muted">0 selected</span></div>
     <div class="table-container"><table><thead><tr><th>Select</th><th>Employee No.</th><th>Worker</th><th>Department</th><th>Designation</th><th>Daily Rate</th><th>OT Rate</th><th>Deployment</th><th>Status</th><th>Actions</th></tr></thead><tbody id="workersTable"></tbody></table></div>
     <div class="lf-pager" id="workersPager"></div>
 </div>
@@ -151,6 +178,7 @@
 <section id="deployments" class="page">
 <div class="section">
   <div class="section-header"><h2>Worker Deployments</h2><div class="controls"><select id="deploymentClientFilter" onchange="renderDeployments()"><option value="all">All Clients</option></select><select id="deploymentStatusFilter" onchange="renderDeployments()"><option value="all">All Status</option><option>Active</option><option>Ended</option></select></div></div>
+  <div class="jts-summary" id="deploymentsSummary"></div>
   <div class="table-container"><table><thead><tr><th>Worker</th><th>Client</th><th>Department</th><th>Assignment</th><th>Shift</th><th>Start</th><th>End</th><th>Status</th><th>Action</th></tr></thead><tbody id="deploymentsTable"></tbody></table></div>
   <div class="lf-pager" id="deploymentsPager"></div>
 </div>

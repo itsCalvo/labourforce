@@ -1,11 +1,9 @@
 /* ============================================================
    THE LABOUR FORCE — SUPERVISOR PORTAL (standalone, lightweight)
-   Loads ONLY supabase-js + config. No admin app code, no xlsx.
-   - Auth via Supabase Auth (shared session with main app)
-   - Authorisation via profile role or supervisor_assignments
-   - Worker search is server-side (LIMIT 10) — never downloads roster
-   - Duplicate attendance blocked (pre-check + DB unique index)
-   - Verification gated by role and enforced again by RLS trigger
+   Open access for now — login will be added later.
+   - Workers appear ONLY via search (never listed upfront)
+   - Attendance capture, verification, edit, cancel
+   - Summary cards show aggregate counts
    ============================================================ */
 (function(){
 'use strict';
@@ -15,8 +13,7 @@ const sb = supabase.createClient(LABOUR_FORCE_SUPABASE_URL, LABOUR_FORCE_SUPABAS
 });
 
 const state = {
-  session:null, profile:null, role:'', deptIds:[], deptNames:new Map(),
-  canVerify:false, scopeAll:false, dayRows:[], verifying:false
+  dayRows: [], searchResults: [], verifying: false, canVerify: true
 };
 
 /* ---------- tiny helpers ---------- */
@@ -25,47 +22,6 @@ function toast(message){const t=$('toast');if(!t)return;t.textContent=message;t.
 function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'\u0026amp;','<':'\u0026lt;','>':'\u0026gt;',"'":'&#39;','"':'\u0026quot;'})[c])}
 function todayStr(){return new Date().toISOString().slice(0,10);} /* matches main app convention */
 function dateInput(){return $('attendanceDate').value||todayStr();}
-function show(view){['authView','deniedView','appView'].forEach(id=>{$(id).hidden=(id!==view);});}
-
-/* ---------- authorisation ---------- */
-const ADMIN_ROLES=['super_admin','administrator','accounts'];
-const CAPTURE_ROLES=['team_leader','accounts','administrator','super_admin'];
-
-async function authorize(session){
-  state.session=session;
-  const uid=session.user.id;
-  const {data:profile,error}=await sb.from('profiles').select('id,full_name,email,active,role_id,roles(name)').eq('id',uid).maybeSingle();
-  if(error||!profile||profile.active===false){
-    await sb.auth.signOut();
-    showDenied('This account has no active Labour Force profile.');
-    return false;
-  }
-  state.profile=profile;
-  state.role=String(profile.roles?.name||'').toLowerCase();
-  /* A supervisor is someone with a capture-capable role OR an explicit
-     supervisor_assignments row. Everyone else is rejected here AND by RLS. */
-  let assignments=[];
-  const {data:sa,error:saError}=await sb.from('supervisor_assignments').select('department_id,active').eq('supervisor_id',uid).eq('active',true);
-  if(!saError)assignments=sa||[];
-  const allowed=CAPTURE_ROLES.includes(state.role)||assignments.length>0;
-  if(!allowed){showDenied();return false;}
-  state.canVerify=ADMIN_ROLES.includes(state.role);
-  state.scopeAll=ADMIN_ROLES.includes(state.role)||assignments.length===0;
-  state.deptIds=[...new Set(assignments.map(a=>a.department_id).filter(Boolean))];
-  /* Small lookup tables only (departments) — never the worker table. */
-  const {data:depts}=await sb.from('departments').select('id,name');
-  state.deptNames=new Map((depts||[]).map(d=>[d.id,d.name]));
-  $('supUserName').textContent=profile.full_name||profile.email||'Supervisor';
-  $('supUserRole').textContent=state.role?state.role.replace(/_/g,' '):'supervisor';
-  $('scopeLabel').textContent=state.scopeAll
-    ?'Attendance only · all departments · no payroll data'
-    :`Attendance only · ${state.deptIds.map(id=>state.deptNames.get(id)||'department').join(', ')||'assigned departments'} · no payroll data`;
-  return true;
-}
-function showDenied(message){
-  $('deniedMessage').textContent=message||'This account does not have supervisor access. Contact your administrator to be assigned a supervisor role or a department assignment.';
-  show('deniedView');
-}
 
 /* ---------- data loading ---------- */
 const DAY_SELECT='id,worker_id,status,hours_worked,overtime_hours,verification_status,verified_at,department_id,notes';
@@ -78,7 +34,6 @@ async function loadDay(){
     .in('status',['present','worked','absent','pending'])
     .order('id',{ascending:true})
     .limit(400);
-  if(!state.scopeAll&&state.deptIds.length)query=query.in('department_id',state.deptIds);
   let {data,error}=await query;
   if(error&&daySelectHasVerification&&/column|42703/i.test(error.message+' '+(error.code||''))){
     daySelectHasVerification=false;
@@ -92,10 +47,6 @@ async function loadDay(){
 
 async function expectedCount(){
   let query=sb.from('workers_public').select('id',{count:'exact',head:true}).eq('active',true);
-  if(!state.scopeAll&&state.deptIds.length){
-    const names=state.deptIds.map(id=>state.deptNames.get(id)).filter(Boolean);
-    if(names.length)query=query.in('department',names);
-  }
   const {count,error}=await query;
   return error?null:(count||0);
 }
@@ -145,7 +96,6 @@ async function loadHistory(){
     .in('status',['present','worked','absent'])
     .order('attendance_date',{ascending:false})
     .limit(120);
-  if(!state.scopeAll&&state.deptIds.length)query=query.in('department_id',state.deptIds);
   let {data,error}=await query;
   if(error&&daySelectHasVerification&&/column|42703/i.test(error.message+' '+(error.code||''))){
     daySelectHasVerification=false;
@@ -164,7 +114,8 @@ async function loadHistory(){
   $('historyTable').innerHTML=rows.map(r=>`<tr><td>${esc(r.attendance_date)}</td><td>${esc(nameMap.get(r.worker_id)||'Worker #'+r.worker_id)}</td><td><span class="status status-${(r.status==='worked'||r.status==='present')?'worked':r.status==='absent'?'absent':'pending'}">${esc(r.status==='worked'?'present':r.status)}</span></td><td>${Number(r.hours_worked||0)}</td><td>${r.verification_status==='verified'?'<span class="status status-approved">Yes</span>':'<span class="status status-pending">No</span>'}</td></tr>`).join('');
 }
 
-/* ---------- server-side worker search (LIMIT 10) ---------- */
+/* ---------- server-side worker search (LIMIT 10) ----------
+   Workers are ONLY discoverable via search — never listed upfront. */
 let searchTimer=null,lastQuery='';
 function queueSearch(){
   clearTimeout(searchTimer);
@@ -203,11 +154,9 @@ async function addWorker(workerId){
   /* Duplicate guard #1: explicit pre-check. */
   const {data:existing}=await sb.from('attendance').select('id').eq('worker_id',workerId).eq('attendance_date',date).maybeSingle();
   if(existing){toast('Worker already added to attendance.');return;}
-  const departmentId=[...state.deptNames.entries()].find(([,name])=>name===w.department)?.id||null;
   const base={worker_id:workerId,attendance_date:date,status:'present',overtime_hours:0};
   const attempts=[
-    {...base,hours_worked:9,department_id:departmentId,notes:null,created_by:state.session.user.id,updated_by:state.session.user.id,supervisor_id:state.session.user.id},
-    {...base,hours_worked:9,department_id:departmentId,created_by:state.session.user.id,updated_by:state.session.user.id},
+    {...base,hours_worked:9,notes:null},
     {...base,hours_worked:9},
     base
   ];
@@ -227,12 +176,11 @@ async function addWorker(workerId){
 }
 
 async function verifyRow(rowId){
-  if(!state.canVerify){toast('Your role cannot verify attendance.');return;}
   if(state.verifying)return;
   state.verifying=true;
   try{
     const {error}=await sb.from('attendance')
-      .update({verification_status:'verified',verified_by:state.session.user.id,verified_at:new Date().toISOString()})
+      .update({verification_status:'verified',verified_at:new Date().toISOString()})
       .eq('id',rowId);
     if(error){toast('Verification rejected: '+error.message);return;}
     toast('Attendance verified.');
@@ -250,8 +198,7 @@ async function editRow(rowId){
   const {error}=await sb.from('attendance').update({
     status:'present',
     hours_worked:Math.min(24,Math.max(0,Number(hours)||0)),
-    overtime_hours:Math.max(0,Number(ot)||0),
-    updated_by:state.session.user.id
+    overtime_hours:Math.max(0,Number(ot)||0)
   }).eq('id',rowId);
   if(error){toast('Update failed: '+error.message);return;}
   await loadDay();
@@ -261,7 +208,7 @@ async function cancelRow(rowId){
   const row=state.dayRows.find(r=>r.id===rowId);
   if(!row)return;
   if(!confirm('Cancel this attendance mark?'))return;
-  const {error}=await sb.from('attendance').update({status:'pending',hours_worked:0,overtime_hours:0,updated_by:state.session.user.id}).eq('id',rowId);
+  const {error}=await sb.from('attendance').update({status:'pending',hours_worked:0,overtime_hours:0}).eq('id',rowId);
   if(error){toast('Cancel failed: '+error.message);return;}
   await loadDay();
 }
@@ -272,39 +219,11 @@ window.__supVerify=verifyRow;
 window.__supEdit=editRow;
 window.__supCancel=cancelRow;
 
-/* ---------- auth UI ---------- */
-async function doLogin(){
-  const email=$('supEmail').value.trim(),password=$('supPassword').value;
-  const out=$('supLoginError');out.textContent='';
-  if(!email||!password){out.textContent='Email and password are required.';return;}
-  $('supDoLogin').disabled=true;
-  try{
-    const {data,error}=await sb.auth.signInWithPassword({email,password});
-    if(error){out.textContent=error.message;return;}
-    if(await authorize(data.session)){show('appView');$('attendanceDate').value=todayStr();await loadDay();}
-  }finally{$('supDoLogin').disabled=false;}
-}
-
-async function signOut(){await sb.auth.signOut();location.reload();}
-
-/* ---------- boot ---------- */
+/* ---------- boot (open access — no login) ---------- */
 (async function boot(){
   $('attendanceDate').value=todayStr();
-  $('supDoLogin').onclick=doLogin;
-  $('supSignOut').onclick=signOut;
-  $('deniedSignOut').onclick=signOut;
   $('workerSearch').addEventListener('input',queueSearch);
   $('attendanceDate').addEventListener('change',loadDay);
-  $('supPassword').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
-  const {data:{session}}=await sb.auth.getSession();
-  if(session){
-    if(await authorize(session)){show('appView');await loadDay();}
-  }else{
-    show('authView');
-  }
-  sb.auth.onAuthStateChange(async(_event,newSession)=>{
-    if(!newSession){show('authView');return;}
-    if(await authorize(newSession)){show('appView');await loadDay();}
-  });
+  await loadDay();
 })();
 })();
