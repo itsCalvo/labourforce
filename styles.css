@@ -42,4 +42,13 @@
 .nav-group-items button{padding:10px 12px;font-size:13px}
 .nav-group-items button .nav-icon{width:22px;font-size:14px}
 @media(max-width:750px){.nav-group-toggle{font-size:0;justify-content:center;padding:10px 5px}.nav-group-toggle .nav-group-arrow{font-size:14px}.nav-group-items{padding-left:0}}
-@media(max-width:600px){.nav-group{display:contents}.nav-group-toggle{display:none}.nav-group-items{display:contents}.nav-group.collapsed .nav-group-items{display:contents}}
+@media(max-width:600px){.nav-group{display:contents}.nav-group-toggle{display:none}.nav-group-items{display:contents}.nav-group.collapsed .nav-group-items{display:contents}}/* ============================================================
+   LOGIN GATE — full-screen authentication overlay
+   ============================================================ */
+.lf-gate{position:fixed;inset:0;z-index:12000;display:none;place-items:center;padding:20px;background:radial-gradient(1200px 600px at 20% 0%,rgba(28,110,77,.25),transparent 60%),linear-gradient(180deg,#081811 0%,#0d1c16 100%)}
+.lf-gate.show{display:grid}
+.lf-gate .lf-login-card{width:min(420px,100%);padding:30px 28px}
+.lf-gate .lf-login-card h2{font-size:23px}
+.lf-gate .lf-login-card p{font-size:12.5px;line-height:1.6}
+.lf-gate .lf-login-card input{width:100%;padding:12px}
+.lf-gate-note{margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,.08);color:#7f929f;font-size:10.5px;text-align:center;letter-spacing:.3px}

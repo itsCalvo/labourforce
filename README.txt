@@ -31,8 +31,15 @@ Authentication -> Users -> Add user
 Then run the commented bootstrap INSERT in schema_patch.sql after replacing
 YOUR-ADMIN-EMAIL@example.com with the administrator's real email.
 
-Open index.html. The Labour Force app works locally without login. Click
-Connect to sign in and enable cloud persistence and role-based access.
+Open index.html. A full-screen login screen appears first: Labour Force now
+requires signing in with a Supabase account before anything loads. Enter your
+email and password and press Sign in. When authenticated:
+
+- your name appears in the top bar next to a Sign out button;
+- cloud sync and role-based access activate automatically;
+- a super_admin account can use every feature of the system.
+
+Sign out from the top bar to return to the login screen.
 
 JTS workbook import
 -------------------
@@ -60,7 +67,7 @@ The application now includes Users & Access for administrators.
 2. Deploy supabase/functions/manage-users/index.ts as an Edge Function named manage-users.
 3. Keep the service-role key only inside Supabase; never put it in config.js.
 4. Bootstrap the first Labour Force super_admin using the commented SQL at the bottom of schema_patch.sql.
-5. Sign in through the Labour Force Connect button.
+5. Sign in through the login screen.
 6. Administrators can create users, change roles, activate/deactivate accounts and see role permissions from Users & Access.
 
 The browser still saves locally first. Supabase is the cloud source of truth and localStorage is the recovery layer.

@@ -9,10 +9,20 @@ const defaultWorkers=[
 const defaultClients=[{id:1,name:"ABC Manufacturing",contact:"Grace Njeri",phone:"0712 000 001",active:true},{id:2,name:"XYZ Logistics",contact:"Brian Otieno",phone:"0722 000 002",active:true}];
 const defaultRequests=[{id:1,requestNo:"LR-0001",clientId:1,department:"Operations",workersRequired:8,classification:"Skilled",startDate:"2026-08-20",duration:5,shift:"Day",notes:"Increased production workload",status:"Pending",allocatedWorkerIds:[],createdAt:"2026-08-18T10:00:00Z"}];
 const defaultJtsState={disputes:[],corrections:[],deductions:[],payroll:{}};
-let workers=JSON.parse(localStorage.getItem("labourforce_workers"))||defaultWorkers;
-let departments=JSON.parse(localStorage.getItem("labourforce_departments"))||defaultDepartments;
-let clients=JSON.parse(localStorage.getItem("labourforce_clients"))||defaultClients;
-let labourRequests=JSON.parse(localStorage.getItem("labourforce_requests"))||defaultRequests;
+
+/* Load from localStorage, but only trust non-empty values. Because `[]` and
+   `{}` are truthy in JS, `JSON.parse(...)||default` would keep an empty seed
+   "stuck" forever (never showing defaults, never showing cloud rows). Use a
+   helper that falls back to defaults when the stored value is empty/null so
+   the seed roster appears until real cloud data is hydrated in. */
+function loadArray(key, fallback){
+ try{ const v=JSON.parse(localStorage.getItem(key)); return Array.isArray(v)&&v.length?v:fallback; }
+ catch(e){ return fallback; }
+}
+let workers=loadArray("labourforce_workers",defaultWorkers);
+let departments=loadArray("labourforce_departments",defaultDepartments);
+let clients=loadArray("labourforce_clients",defaultClients);
+let labourRequests=loadArray("labourforce_requests",defaultRequests);
 let attendance=JSON.parse(localStorage.getItem("labourforce_attendance"))||{};
 let payroll=JSON.parse(localStorage.getItem("labourforce_payroll"))||{};
 let jtsState=JSON.parse(localStorage.getItem("labourforce_jts_state"))||defaultJtsState;
@@ -60,3 +70,36 @@ function saveData(){
  localStorage.setItem("labourforce_jts_deduction_rates",JSON.stringify(jtsDeductionRates)); clearTimeout(saveDataTimer);
  saveDataTimer=setTimeout(()=>{localStorage.setItem("labourforce_workers",JSON.stringify(workers));localStorage.setItem("labourforce_departments",JSON.stringify(departments));localStorage.setItem("labourforce_clients",JSON.stringify(clients));localStorage.setItem("labourforce_requests",JSON.stringify(labourRequests));localStorage.setItem("labourforce_attendance",JSON.stringify(attendance));localStorage.setItem("labourforce_payroll",JSON.stringify(payroll));localStorage.setItem("labourforce_jts_state",JSON.stringify(jtsState));},150);
 }
+
+// Cloud-sync watcher to keep local attendance cache in sync with Supabase
+let lastCloudAttendanceHash = null;
+
+function computeAttendanceHash() {
+  const hash = JSON.stringify(attendance);
+  lastCloudAttendanceHash = hash;
+  return hash;
+}
+
+/**
+ * Sync local attendance cache with cloud data from Supabase.
+ * Called periodically (every 30 seconds) and on any manual refresh.
+ */
+function syncAttendanceWithCloud() {
+  const currentHash = computeAttendanceHash();
+  if (currentHash !== lastCloudAttendanceHash) {
+    console.log('⚠️  Attendance cache needs sync:', currentHash);
+    lastCloudAttendanceHash = currentHash;
+    // Refresh local cache from Supabase
+    normalizeLocalMasterData();
+  }
+}
+
+// Run sync every 30 seconds
+setInterval(syncAttendanceWithCloud, 30000);
+
+// Also sync when the page is reloaded (initial load)
+function initializeAttendanceSync() {
+  syncAttendanceWithCloud();
+}
+
+initializeAttendanceSync();

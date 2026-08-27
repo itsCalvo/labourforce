@@ -38,6 +38,16 @@ function employeeNo(){let max=0;workers.forEach(w=>{const m=String(w.employeeNo|
 function currentRoleName(){return String(window.lfCurrentRole||'').toLowerCase();}
 function canManageWorkerMasterData(){const role=currentRoleName();return ['super_admin','administrator','accounts','hr','human_resources'].includes(role);}
 function canCaptureAttendance(){const role=currentRoleName();return ['super_admin','administrator','accounts','team_leader'].includes(role) || !role;}
+/* Hide nav items the signed-in role is not allowed to use. Runs after
+   authentication so the Users link only shows for super_admin/administrator. */
+function updateNavVisibility(){
+  const role=currentRoleName();
+  const managers=role==='super_admin'||role==='administrator';
+  document.querySelectorAll('.nav button[data-permission]').forEach(btn=>{
+    const perm=btn.getAttribute('data-permission');
+    btn.style.display=(perm==='users.manage'&&!managers)?'none':'';
+  });
+}
 
 /* ---------- verification permission model ----------
    Capture (team_leader and above) marks attendance.
@@ -346,10 +356,26 @@ function renderWorkersBulk(){
  table.innerHTML=pageRows.length?pageRows.map(w=>{
    const deployment=w.client?`${esc(w.client)}<br><small class="muted">${esc(w.assignment||"")}</small>`:'<span class="muted">Unassigned</span>';
    const editBtn=canManageWorkerMasterData()?`<button class="secondary" onclick="editWorker(${w.id})">Edit</button>`:`<button class="secondary" onclick="reportJtsCorrection(${w.id})">Request change</button>`;
-   return `<tr><td><input class="worker-select" type="checkbox" value="${w.id}" ${selected.has(Number(w.id))?"checked":""} onchange="updateWorkerSelection()"></td><td><strong>${esc(w.employeeNo)}</strong></td><td><strong>${esc(w.name)}</strong><br><small class="muted">${esc(w.idNumber||"ID not set")} · ${esc(w.joinDate||"—")}</small></td><td>${esc(w.department)}</td><td>${esc(w.designation||w.classification||"")}</td><td>${money(w.rate)}</td><td>${money(w.otRate)}</td><td>${deployment}</td><td><span class="status ${w.active?"status-worked":"status-absent"}">${w.active?"Active":"Inactive"}</span></td><td>${editBtn} <button class="primary" onclick="openDeploymentModal(${w.id})">Move</button></td></tr>`;
+   return `<tr><td><input class="worker-select" type="checkbox" value="${w.id}" ${selected.has(Number(w.id))?"checked":""} onchange="updateWorkerSelection()"></td><td><strong>${esc(w.employeeNo)}</strong></td><td><strong>${esc(w.name)}</strong><br><small class="muted">${esc(w.idNumber||"ID not set")} · ${esc(w.joinDate||"—")}</small></td><td>${esc(w.department)}</td><td>${esc(w.designation||w.classification||"")}</td><td>${money(w.rate)}</td><td>${money(w.otRate)}</td><td>${deployment}</td><td><span class="status ${w.active?"status-worked":"status-absent"}">${w.active?"Active":"Inactive"}</span></td><td>${editBtn} <button class="primary" onclick="openDeploymentModal(${w.id})">Move</button> ${canManageWorkerMasterData()?`<button class="danger" onclick="deleteWorker(${w.id})">Delete</button>`:''}</td></tr>`;
  }).join(''):'<tr><td colspan="10"><div class="empty">No workers found.</div></td></tr>';
  lfRenderPager('workersPager','workers','workers');
  updateWorkerSelection();
+}
+function deleteWorker(id){
+ if(!canManageWorkerMasterData()){showToast("Only accountant / HR can delete workers.");return;}
+ const w=workers.find(x=>Number(x.id)===Number(id));if(!w)return;
+ if(!confirm(`Delete ${w.employeeNo} — ${w.name} permanently? Their attendance history and deployments will be removed too.`))return;
+ workers=workers.filter(x=>Number(x.id)!==Number(id));
+ Object.keys(attendance).forEach(date=>{const day=attendance[date];if(day&&day.records)delete day.records[id];});
+ if(typeof deployments!=='undefined'&&Array.isArray(deployments))deployments=deployments.filter(d=>Number(d.workerId)!==Number(id));
+ if(typeof jtsState!=="undefined"){
+   jtsState.corrections=jtsState.corrections.filter(c=>Number(c.workerId)!==Number(id));
+   jtsState.disputes=jtsState.disputes.filter(c=>Number(c.workerId)!==Number(id));
+ }
+ if(typeof audit==='function')audit('Worker deleted',w.employeeNo,w.name);
+ saveData();if(typeof saveAdvanced==='function')saveAdvanced();
+ renderWorkers();rerenderIfActive('departments');rerenderIfActive('availability');
+ showToast(`${w.employeeNo} deleted.`);
 }
 function updateWorkerSelection(){const selected=document.querySelectorAll(".worker-select:checked").length,count=document.getElementById("workerSelectionCount");if(count)count.textContent=`${selected} selected`;}
 function toggleAllWorkers(checked){document.querySelectorAll(".worker-select").forEach(input=>input.checked=checked);updateWorkerSelection();}
@@ -367,9 +393,56 @@ function openClientModal(){ensureModal('clientModal');document.getElementById("e
 function editClient(id){ensureModal('clientModal');const c=clientById(id);if(!c)return;openClientModal();document.getElementById("editingClientId").value=id;document.getElementById("clientModalTitle").textContent="Edit Client";document.getElementById("clientName").value=c.name;document.getElementById("clientContact").value=c.contact||"";document.getElementById("clientPhone").value=c.phone||""}
 function saveClient(){const id=document.getElementById("editingClientId").value,name=document.getElementById("clientName").value.trim(),contact=document.getElementById("clientContact").value.trim(),phone=document.getElementById("clientPhone").value.trim();if(!name){alert("Enter the company name.");return}if(id){const c=clientById(id);Object.assign(c,{name,contact,phone});showToast("Client updated.")}else{clients.push({id:Date.now(),name,contact,phone,active:true});showToast("Client added.")}saveData();closeModal("clientModal");populateClientSelects();renderClients()}
 function toggleClient(id){const c=clientById(id);if(!c)return;c.active=!c.active;saveData();populateClientSelects();renderClients();showToast(c.active?`${c.name} activated.`:`${c.name} deactivated.`)}
-function renderDepartments(){const table=document.getElementById("departmentsTable");if(!table)return;table.innerHTML=departments.map(d=>{const count=workers.filter(w=>w.active&&w.department===d.name).length;return `<tr><td><strong>${esc(d.name)}</strong></td><td>${esc(d.parent||"—")}</td><td>${count}</td><td>${d.rate?money(d.rate):'Worker rate'}</td><td>${d.otRate?money(d.otRate):'Worker rate'}</td></tr>`}).join('')||'<tr><td colspan="5"><div class="empty">No departments yet.</div></td></tr>'}
-function openDepartmentModal(){ensureModal('departmentModal');populateFilters();document.getElementById("departmentName").value="";document.getElementById("departmentRate").value="";document.getElementById("departmentOtRate").value="";document.getElementById("departmentModal").classList.add("show")}
-function saveDepartment(){const name=document.getElementById("departmentName").value.trim(),parent=document.getElementById("departmentParent").value,rate=Number(document.getElementById("departmentRate").value)||0,otRate=Number(document.getElementById("departmentOtRate").value)||0;if(!name){alert("Enter a department name.");return}const existing=departments.find(d=>d.name.toLowerCase()===name.toLowerCase());if(existing){existing.rate=rate;existing.otRate=otRate;showToast("Department wage defaults updated.");}else departments.push({name,parent,rate,otRate});saveData();closeModal("departmentModal");populateFilters();renderDepartments();showToast(existing?"Department wage defaults updated.":"Department added.")}
+function renderDepartments(){const table=document.getElementById("departmentsTable");if(!table)return;const canEdit=canManageWorkerMasterData();table.innerHTML=departments.map((d,i)=>{const count=workers.filter(w=>w.active&&w.department===d.name).length;const actions=canEdit?`<button class="secondary" onclick="editDepartment(${i})">Edit</button> <button class="danger" onclick="deleteDepartment(${i})">Delete</button>`:'—';return `<tr><td><strong>${esc(d.name)}</strong></td><td>${esc(d.parent||"—")}</td><td>${count}</td><td>${d.rate?money(d.rate):'Worker rate'}</td><td>${d.otRate?money(d.otRate):'Worker rate'}</td><td>${actions}</td></tr>`}).join('')||'<tr><td colspan="6"><div class="empty">No departments yet.</div></td></tr>'}
+function openDepartmentModal(){ensureModal('departmentModal');document.getElementById("departmentModalTitle").textContent="Add Department";document.getElementById("departmentOriginalName").value="";populateFilters();document.getElementById("departmentName").value="";document.getElementById("departmentRate").value="";document.getElementById("departmentOtRate").value="";document.getElementById("departmentModal").classList.add("show")}
+function editDepartment(index){
+ if(!canManageWorkerMasterData()){showToast("Only accountant / HR can edit department master data.");return;}
+ const d=departments[index];if(!d)return;
+ openDepartmentModal();
+ document.getElementById("departmentModalTitle").textContent=`Edit ${d.name}`;
+ document.getElementById("departmentOriginalName").value=d.name;
+ document.getElementById("departmentName").value=d.name;
+ document.getElementById("departmentRate").value=d.rate||"";
+ document.getElementById("departmentOtRate").value=d.otRate||"";
+ const parent=document.getElementById("departmentParent");
+ if(parent&&d.parent){const opts=[...parent.options];const found=opts.find(o=>o.value===d.parent);if(found)parent.value=d.parent;else parent.value="";}
+ document.getElementById("departmentModal").classList.add("show");
+}
+function saveDepartment(){
+ const name=document.getElementById("departmentName").value.trim(),parent=document.getElementById("departmentParent").value,rate=Number(document.getElementById("departmentRate").value)||0,otRate=Number(document.getElementById("departmentOtRate").value)||0;
+ const original=document.getElementById("departmentOriginalName")?.value||"";
+ if(!name){alert("Enter a department name.");return}
+ const existing=departments.find(d=>d.name.toLowerCase()===name.toLowerCase());
+ if(existing&&existing.name!==original){alert("A department with that name already exists.");return}
+ if(original){
+   const target=departments.find(d=>d.name===original);if(!target)return;
+   const oldName=target.name;
+   target.name=name;target.parent=parent;target.rate=rate;target.otRate=otRate;
+   if(oldName!==name){
+     workers.forEach(w=>{if(w.department===oldName)w.department=name;});
+     if(typeof deployments!=='undefined'&&Array.isArray(deployments))deployments.forEach(dep=>{if(dep.department===oldName)dep.department=name;});
+     if(typeof jtsState!=="undefined"){jtsState.corrections.forEach(c=>{if(c.department===oldName)c.department=name;});jtsState.disputes.forEach(c=>{if(c.department===oldName)c.department=name;});}
+   }
+   if(typeof audit==='function'&&oldName!==name)audit('Department renamed',oldName,name);
+   showToast(oldName!==name?`Department renamed to ${name}.`:"Department updated.");
+ }else if(existing){existing.parent=parent;existing.rate=rate;existing.otRate=otRate;showToast("Department wage defaults updated.");}
+ else{departments.push({name,parent,rate,otRate});showToast("Department added.")}
+ saveData();closeModal("departmentModal");populateFilters();renderDepartments();renderWorkers();
+}
+function deleteDepartment(index){
+ if(!canManageWorkerMasterData()){showToast("Only accountant / HR can delete departments.");return;}
+ const d=departments[index];if(!d)return;
+ const activeWorkers=workers.filter(w=>w.active&&w.department===d.name);
+ if(activeWorkers.length&&!confirm(`${activeWorkers.length} active worker(s) belong to "${d.name}". Delete anyway? Their department will be cleared.`))return;
+ if(!confirm(`Delete department "${d.name}" permanently?`))return;
+ workers.forEach(w=>{if(w.department===d.name)w.department="";});
+ if(typeof deployments!=='undefined'&&Array.isArray(deployments))deployments.forEach(dep=>{if(dep.department===d.name)dep.department="";});
+ departments=departments.filter(x=>x!==d);
+ if(typeof audit==='function')audit('Department deleted',d.name,'');
+ saveData();if(typeof saveAdvanced==='function')saveAdvanced();
+ populateFilters();renderDepartments();renderWorkers();rerenderIfActive('availability');
+ showToast(`Department ${d.name} deleted.`);
+}
 
 /* ---------- payroll (memoized + paginated) ---------- */
 let lfPayrollCache={key:'',result:null};
@@ -600,6 +673,80 @@ function renderWorkerPortal(){
 /* ---------- CSV export ---------- */
 function downloadCSV(filename,rows){const csv=rows.map(row=>row.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n");const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url)}
 function exportAttendance(){const date=document.getElementById("attendanceDate").value||today(),rows=[["Employee No.","Worker","Department","Classification","Daily Rate","OT Rate","Status","OT Hours","OT Pay","Total Pay","Verification"]];workers.filter(w=>w.active).forEach(w=>{const r=peekAttendance(date,w.id),reg=r.status==="worked"?w.rate:0,ot=Number(r.overtime||0)*w.otRate;rows.push([w.employeeNo,w.name,w.department,w.classification,w.rate,w.otRate,r.status,r.overtime,ot,reg+ot,r.verification_status||'unverified'])});downloadCSV(`attendance-${date}.csv`,rows)}
+function exportPayroll(){const rows=[[\"Worker\",\"Days Worked\",\"Daily Rate\",\"Regular Pay\",\"OT Hours\",\"OT Pay\",\"Gross\"]];document.querySelectorAll(\"#payrollTable tr\").forEach(row=>{const cells=[...row.querySelectorAll(\"td\")].map(c=>c.innerText.trim());if(cells.length)rows.push(cells)});downloadCSV(\"payroll.csv\",rows);showToast(\"Payroll CSV exported.\")}
+
+function calculateFairShareAttendance(){
+    // Get current date range (last 30 days by default)
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(endDate.getDate() - 30); // Last 30 days
+    
+    // Format dates as YYYY-MM-DD
+    const formatDate = (date) => date.toISOString().split('T')[0];
+    const endDateStr = formatDate(endDate);
+    const startDateStr = formatDate(startDate);
+    
+    // Get all active workers
+    const activeWorkers = workers.filter(w => w.active);
+    
+    // Calculate days worked for each worker
+    const workerStats = activeWorkers.map(worker => {
+        let daysWorked = 0;
+        let totalHours = 0;
+        
+        // Check each date in range
+        let currentDate = new Date(startDate);
+        while (currentDate <= endDate) {
+            const dateStr = formatDate(currentDate);
+            const record = peekAttendance(dateStr, worker.id);
+            
+            if (record.status === 'worked' || record.status === 'present') {
+                daysWorked++;
+                totalHours += Number(record.hours || 0);
+            }
+            
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+        
+        return {
+            worker: worker,
+            daysWorked: daysWorked,
+            totalHours: totalHours,
+            avgHoursPerDay: daysWorked > 0 ? totalHours / daysWorked : 0
+        };
+    });
+    
+    // Calculate total worked days across all workers
+    const totalWorkedDays = workerStats.reduce((sum, stat) => sum + stat.daysWorked, 0);
+    const fairShareDays = activeWorkers.length > 0 ? totalWorkedDays / activeWorkers.length : 0;
+    
+    // Display results
+    const output = [];
+    output.push(`=== FAIR SHARE ATTENDANCE ANALYSIS (Last 30 days) ===`);
+    output.push(`Period: ${startDateStr} to ${endDateStr}`);
+    output.push(`Total Active Workers: ${activeWorkers.length}`);
+    output.push(`Total Worked Days Across All Workers: ${totalWorkedDays}`);
+    output.push(`Fair Share Days Per Worker: ${fairShareDays.toFixed(2)}`);
+    output.push('');
+    output.push('Individual Worker Stats:');
+    output.push('-'.repeat(50));
+    
+    workerStats.forEach(stat => {
+        const {worker, daysWorked, totalHours, avgHoursPerDay} = stat;
+        const fairShareDiff = daysWorked - fairShareDays;
+        const status = fairShareDiff >= 0 ? 'ABOVE' : 'BELOW';
+        output.push(`${worker.employeeNo} ${worker.name.padEnd(20)} | Days: ${daysWorked.toString().padStart(2)} | Hours: ${totalHours.toString().padStart(3)} | Avg/Day: ${avgHoursPerDay.toFixed(1)} | Fair Share: ${fairShareDays.toFixed(2)} (${status} ${Math.abs(fairShareDiff).toFixed(2)})`);
+    });
+    
+    const result = output.join('\n');
+    console.log(result);
+    alert(result);
+    
+    return workerStats;
+}
+
+// Add to window for easy access from console
+window.calculateFairShareAttendance = calculateFairShareAttendance;
 function exportPayroll(){const rows=[["Worker","Days Worked","Daily Rate","Regular Pay","OT Hours","OT Pay","Gross"]];document.querySelectorAll("#payrollTable tr").forEach(row=>{const cells=[...row.querySelectorAll("td")].map(c=>c.innerText.trim());if(cells.length)rows.push(cells)});downloadCSV("payroll.csv",rows);showToast("Payroll CSV exported.")}
 
 /* ---------- pager rerender registry ---------- */
@@ -632,5 +779,16 @@ LF_PAGER_RERENDER.payroll=()=>renderPayroll();
  wire('supervisorSearch',()=>renderSupervisorPortal());
  wire('jtsPayrollSearch',()=>renderJtsPayroll());
  wire('userSearch',()=>{if(typeof renderUsers==='function')renderUsers();});
- setTimeout(()=>{renderDashboard();const hash=(location.hash||'').replace('#','');if(hash&&hash!=='dashboard'&&document.getElementById(hash))showPage(hash);},0);
+ /* The app only renders once the user is authenticated: supabase.js
+    dismisses the login gate and dispatches 'labourforce:ready'. */
+ let lfAppRendered=false;
+ function lfRenderInitialPage(){
+   if(lfAppRendered)return;
+   lfAppRendered=true;
+   renderDashboard();
+   const hash=(location.hash||'').replace('#','');
+   if(hash&&hash!=='dashboard'&&document.getElementById(hash))showPage(hash);
+ }
+ window.addEventListener('labourforce:ready',lfRenderInitialPage);
+ window.addEventListener('labourforce:ready',()=>{if(typeof updateNavVisibility==='function')updateNavVisibility();});
 })();
