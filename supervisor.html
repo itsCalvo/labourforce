@@ -1,0 +1,229 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Supervisor Portal - Labour Force</title>
+<style>
+/* Dark theme */
+:root {
+  --bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;
+  --text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--accent2:#3fb950;
+  --danger:#f85149;--pill-pres:#1a4a33;--pill-abst:#4a1a1a;--pill-pend:#2a2a2a;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;min-height:100vh}
+.sup-page{max-width:1100px;margin:0 auto;padding:0 20px 48px}
+
+/* Header */
+.sup-header{display:flex;justify-content:space-between;align-items:center;padding:18px 0 16px;border-bottom:1px solid var(--border);gap:14px;flex-wrap:wrap}
+.sup-logo{display:flex;align-items:center;gap:10px}
+.sup-logo-mark{width:32px;height:32px;background:var(--accent);border-radius:8px;display:grid;place-items:center;font-size:16px;font-weight:700;color:#fff;flex-shrink:0}
+.sup-logo-text h1{font-size:17px;font-weight:600;color:var(--text)}
+.sup-logo-text p{font-size:11px;color:var(--muted);margin-top:1px}
+.sup-header-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sup-user-card{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:7px 12px}
+.sup-avatar{width:28px;height:28px;border-radius:50%;background:var(--accent);display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0}
+.sup-user-info{font-size:12px;line-height:1.4}
+.sup-user-info strong{color:var(--text);display:block}
+.sup-user-info span{color:var(--muted);font-size:11px}
+.btn{padding:7px 14px;border-radius:8px;border:none;cursor:pointer;font-size:12px;font-weight:500;transition:opacity .15s}
+.btn:hover{opacity:.85}
+.btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* Stats */
+.sup-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}
+@media(max-width:640px){.sup-stats{grid-template-columns:repeat(2,1fr)}}
+.sup-stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
+.sup-stat-label{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.sup-stat-value{font-size:28px;font-weight:700;line-height:1;color:var(--text)}
+.sup-stat-value.present{color:var(--accent2)}
+.sup-stat-value.absent{color:var(--danger)}
+.sup-stat-value.pending{color:var(--muted)}
+.sup-stat-sub{font-size:10px;color:var(--muted);margin-top:3px}
+
+/* Section */
+.sup-section{background:var(--surface);border:1px solid var(--border);border-radius:14px;margin-bottom:18px;overflow:hidden}
+.sup-section-head{padding:13px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;font-size:13px;font-weight:600;color:var(--text)}
+.sup-section-head .right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sup-section-body{padding:14px 18px}
+
+/* Search */
+.sup-search-wrap{position:relative}
+.sup-search-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none;font-size:13px}
+#supSearch{width:100%;max-width:340px;padding:9px 12px 9px 34px;border:1px solid var(--border);border-radius:9px;background:var(--surface2);color:var(--text);font-size:13px;outline:none;transition:border-color .15s}
+#supSearch:focus{border-color:var(--accent)}
+#supSearch::placeholder{color:var(--muted)}
+.sup-date-picker{padding:7px 11px;border:1px solid var(--border);border-radius:9px;background:var(--surface2);color:var(--text);font-size:12px;outline:none}
+
+/* Search results */
+#supSearchResults{min-height:40px}
+.sup-hint{color:var(--muted);font-size:12px;padding:8px 2px}
+.sup-worker-card{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border:1px solid var(--border);border-radius:10px;margin-bottom:6px;background:var(--surface2);gap:12px;transition:border-color .15s}
+.sup-worker-card:hover{border-color:var(--accent)}
+.sup-worker-info{display:flex;flex-direction:column;gap:2px;min-width:0}
+.sup-worker-name{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.sup-worker-meta{font-size:11px;color:var(--muted);display:flex;gap:6px;flex-wrap:wrap}
+.sup-worker-meta span{display:flex;align-items:center;gap:3px}
+.sup-worker-actions{display:flex;gap:6px;flex-shrink:0;align-items:center;flex-wrap:wrap}
+
+/* Pills */
+.sup-pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.3px}
+.sup-pill.present{background:var(--pill-pres);color:var(--accent2)}
+.sup-pill.absent{background:var(--pill-abst);color:var(--danger)}
+.sup-pill.pending{background:var(--pill-pend);color:var(--muted)}
+
+/* Table */
+.sup-table-wrap{overflow-x:auto}
+table.sup-table{width:100%;border-collapse:collapse;min-width:600px}
+table.sup-table th,table.sup-table td{padding:10px 14px;text-align:left;font-size:13px}
+table.sup-table th{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap}
+table.sup-table td{border-bottom:1px solid var(--border);color:var(--text)}
+table.sup-table tbody tr:hover{background:var(--surface2)}
+table.sup-table tbody tr:last-child td{border-bottom:none}
+table.sup-table .chk{width:34px}
+table.sup-table .act{white-space:nowrap}
+input[type="checkbox"]{width:15px;height:15px;cursor:pointer;accent-color:var(--accent)}
+
+/* Empty */
+.sup-empty{padding:36px 0;text-align:center;color:var(--muted);font-size:13px}
+.sup-empty-icon{font-size:32px;margin-bottom:8px;opacity:.4}
+
+/* Spinner */
+.sup-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:sup-spin .6s linear infinite}
+@keyframes sup-spin{to{transform:rotate(360deg)}}
+
+/* Toast */
+#supToast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);padding:11px 20px;border-radius:10px;background:var(--surface2);color:var(--text);font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:.22s;z-index:9999;border:1px solid var(--border);min-width:200px;text-align:center}
+#supToast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#supToast.error{border-color:var(--danger);color:var(--danger)}
+#supToast.success{border-color:var(--accent2);color:var(--accent2)}
+
+/* Auth gate */
+.sup-auth-gate{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9000;padding:20px}
+.sup-auth-card{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:28px;width:min(400px,100%);text-align:center}
+.sup-auth-logo{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:24px}
+.sup-auth-logo-mark{width:36px;height:36px;background:var(--accent);border-radius:10px;display:grid;place-items:center;font-size:17px;font-weight:700;color:#fff}
+.sup-auth-logo-title{font-size:16px;font-weight:600}
+.sup-auth-logo-sub{font-size:11px;color:var(--muted)}
+.sup-auth-form{display:flex;flex-direction:column;gap:10px}
+.sup-auth-form input{padding:10px 13px;border:1px solid var(--border);border-radius:9px;background:var(--surface2);color:var(--text);font-size:13px;outline:none;transition:border-color .15s}
+.sup-auth-form input:focus{border-color:var(--accent)}
+.sup-auth-form input::placeholder{color:var(--muted)}
+.sup-login-err{font-size:12px;color:var(--danger);min-height:16px;text-align:left}
+.sup-auth-back{display:block;margin-top:16px;font-size:11px;color:var(--muted);text-decoration:none}
+.sup-auth-back:hover{color:var(--accent)}
+
+/* Loading */
+.sup-loading{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;padding:60px 0;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<div class="sup-page">
+<!-- Auth gate -->
+<div class="sup-auth-gate" id="supAuth">
+  <div class="sup-auth-card">
+    <div class="sup-auth-logo">
+      <div class="sup-auth-logo-mark">LF</div>
+      <div>
+        <div class="sup-auth-logo-title">Labour Force</div>
+        <div class="sup-auth-logo-sub">Supervisor Portal</div>
+      </div>
+    </div>
+    <div class="sup-auth-form">
+      <input id="supEmail" type="email" placeholder="Email address" autocomplete="username">
+      <input id="supPassword" type="password" placeholder="Password" autocomplete="current-password">
+      <div class="sup-login-err" id="supLoginErr"></div>
+      <button class="btn btn-primary" id="supDoLogin">Sign in</button>
+    </div>
+    <a class="sup-auth-back" href="index.html">Back to Labour Force</a>
+  </div>
+</div>
+
+<!-- Portal -->
+<main id="supPortal" style="display:none">
+
+  <header class="sup-header">
+    <div class="sup-logo">
+      <div class="sup-logo-mark">LF</div>
+      <div class="sup-logo-text">
+        <h1>Supervisor Portal</h1>
+        <p>Daily attendance management</p>
+      </div>
+    </div>
+    <div class="sup-header-right">
+      <div class="sup-user-card">
+        <div class="sup-avatar" id="supAvatar">S</div>
+        <div class="sup-user-info">
+          <strong id="supUserName">-</strong>
+          <span id="supUserMeta">-</span>
+        </div>
+      </div>
+      <input id="supDate" type="date" class="sup-date-picker">
+      <button class="btn btn-ghost" id="supSignOut">Sign out</button>
+    </div>
+  </header>
+
+  <!-- Stats -->
+  <div class="sup-stats">
+    <div class="sup-stat"><div class="sup-stat-label">Expected</div><div class="sup-stat-value" id="supExpected">0</div><div class="sup-stat-sub">workers assigned</div></div>
+    <div class="sup-stat"><div class="sup-stat-label">Present</div><div class="sup-stat-value present" id="supPresent">0</div><div class="sup-stat-sub">marked today</div></div>
+    <div class="sup-stat"><div class="sup-stat-label">Absent</div><div class="sup-stat-value absent" id="supAbsent">0</div><div class="sup-stat-sub">marked today</div></div>
+    <div class="sup-stat"><div class="sup-stat-label">Pending</div><div class="sup-stat-value pending" id="supPending">0</div><div class="sup-stat-sub">unmarked</div></div>
+  </div>
+
+  <!-- Search -->
+  <section class="sup-section">
+    <div class="sup-section-head">
+      <span>Add attendance</span>
+      <div class="right">
+        <div class="sup-search-wrap">
+          <span class="sup-search-icon">&#x1F50D;</span>
+          <input id="supSearch" type="search" placeholder="Search by name, ID, or staff no. then press Enter...">
+        </div>
+      </div>
+    </div>
+    <div class="sup-section-body">
+      <div id="supSearchResults">
+        <div class="sup-hint">Type at least 2 characters and press Enter to search for a worker.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Table -->
+  <section class="sup-section">
+    <div class="sup-section-head">
+      <span>Todays attendance</span>
+      <div class="right">
+        <button class="btn btn-secondary" id="supEditSelected">Edit selected</button>
+        <button class="btn btn-danger" id="supMarkAbsentSelected">Mark absent</button>
+        <button class="btn btn-ghost" id="supCancelSelected">Clear mark</button>
+        <button class="btn btn-primary" id="supSubmitBtn">Submit to cloud</button>
+      </div>
+    </div>
+    <div class="sup-table-wrap">
+      <table class="sup-table">
+        <thead>
+          <tr>
+            <th class="chk"><input type="checkbox" id="supSelectAll"></th>
+            <th>Worker</th><th>ID / Staff no.</th><th>Status</th><th>Hrs</th><th>OT</th><th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="supMarkedTable"></tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+</div>
+<div id="supToast" class="sup-toast"></div>
+<script src="vendor/supabase.min.js"></script>
+<script src="config.js?v=20260829020000"></script>
+<script src="supabase.js?v=20260829080000"></script>
+<script src="supervisor.js?v=20260829060000"></script>
+</body>
+</html>

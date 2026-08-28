@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -40,7 +40,7 @@
             <button class="nav-group-toggle" onclick="toggleNavGroup('people')"><span class="nav-group-arrow">▾</span>People</button>
             <div class="nav-group-items">
                 <button onclick="showPage('workers', this)"><span class="nav-icon">👥</span>Workers</button>
-                <button onclick="showPage('supervisor', this)"><span class="nav-icon">🛡️</span>Supervisor Portal</button>
+                <button onclick="window.open('supervisor.html','_blank')"><span class="nav-icon">🛡️</span>Supervisor Portal</button>
                 <button onclick="showPage('worker-portal', this)"><span class="nav-icon">🧑</span>My Attendance</button>
                 <button onclick="showPage('approval', this)"><span class="nav-icon">✓</span>Approval</button>
             </div>
@@ -291,12 +291,12 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="vendor/supabase.min.js"></script>
 <script src="config.js"></script>
 <script src="data.js"></script>
 <script src="app.js"></script>
 <script src="advanced.js"></script>
-<script src="supabase.js"></script>
+<script src="supabase.js?v=20260829080000"></script>
 <script src="users.js"></script>
 </body>
 </html>

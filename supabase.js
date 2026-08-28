@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
    THE LABOUR FORCE — RESILIENT DATA LAYER (performance-refactored)
    Local-first + Supabase sync + audit + reconnect recovery.
    - Hydration is single-flight (no duplicate table downloads)
@@ -115,7 +115,11 @@ async function handleSession(session){
     updateUserDisplay(profile);
     hideAuthGate();
     await hydrateFromBackend();
-    await hydrateAttendanceFromBackend();
+    // Attendance hydration is non-blocking: the dashboard becomes interactive
+    // immediately while a bounded 90-day window of attendance refreshes in the
+    // background. The full historical attendance is synced via syncLocalState
+    // (queueBackendSync), not by re-downloading everything on every login.
+    hydrateAttendanceFromBackend().catch(err=>console.warn('[Labour Force] attendance hydration deferred:',err.message));
     window.dispatchEvent(new CustomEvent('labourforce:ready'));
   }catch(error){
     console.error('[Labour Force] profile check failed',error);
@@ -333,6 +337,23 @@ async function syncAttendance(){
   }
   await pushAttendanceRows(rows);
 }
+/* Attendance-only sync: pushes attendance changes WITHOUT re-uploading
+   workers/departments/clients/requests. Used for ATT_MUTATORS in
+   installSaveHook so that marking one worker present/absent does not
+   trigger a full master-data push. */
+async function syncAttendanceOnly(){
+  if(!labourForceSession)return;
+  if(syncBusy)return;
+  if(typeof attendance==='undefined')return;
+  syncBusy=true;
+  try{
+    await syncAttendance();
+  }catch(error){
+    console.warn('[Labour Force] attendance-only sync failed:',error.message);
+  }finally{
+    syncBusy=false;
+  }
+}
 async function syncPayroll(){
   // Payroll remains locally calculated; persisted records can be added later once a period is explicitly created.
 }
@@ -358,21 +379,29 @@ async function hydrateAttendanceFromBackend(){
   try{
     const remoteRows=[];
     let from=0, pageSize=1000, hasMore=true;
+    // Fetch only the last 90 days. Full historical attendance is synced
+    // separately via syncLocalState. Previously this ran a paged while-loop
+    // fetching ALL attendance rows on every page load, blocking for many seconds.
+    const cutoff=new Date(); cutoff.setDate(cutoff.getDate()-90);
+    const since=cutoff.toISOString().split('T')[0];
     const RICH='attendance_date,worker_id,status,overtime_hours,time_in,time_out,submitted_at,remarks,supervisor_id';
     while(hasMore){
       let data=null, err=null;
       try{
-        const a=await labourForceSupabase.from('attendance').select(RICH).order('attendance_date',{ascending:false}).range(from,from+pageSize-1);
+        const a=await labourForceSupabase.from('attendance').select(RICH)
+          .gte('attendance_date',since).order('attendance_date',{ascending:false}).range(from,from+pageSize-1);
         if(a.error){
           /* 42703 = column does not exist. The deployed schema may not have
              time_in/time_out/remarks/supervisor_id etc., so fall back to a
              narrower safe set, then to `*`. Crucially the fallback must NOT
              keep selecting the missing column or it re-fails with 42703. */
           if(a.error.code!=='42703') throw a.error;
-          const b=await labourForceSupabase.from('attendance').select('attendance_date,worker_id,status,overtime_hours').order('attendance_date',{ascending:false}).range(from,from+pageSize-1);
+          const b=await labourForceSupabase.from('attendance').select('attendance_date,worker_id,status,overtime_hours')
+            .gte('attendance_date',since).order('attendance_date',{ascending:false}).range(from,from+pageSize-1);
           if(b.error){
             if(b.error.code!=='42703') throw b.error;
-            const c=await labourForceSupabase.from('attendance').select('*').order('attendance_date',{ascending:false}).range(from,from+pageSize-1);
+            const c=await labourForceSupabase.from('attendance').select('*')
+              .gte('attendance_date',since).order('attendance_date',{ascending:false}).range(from,from+pageSize-1);
             if(c.error) throw c.error;
             data=c.data;
           } else { data=b.data; }
@@ -480,6 +509,9 @@ async function syncLocalState(){
   }finally{ syncBusy=false; }
 }
 function queueBackendSync(){ clearTimeout(syncTimer); syncTimer=setTimeout(syncLocalState,450); }
+/* Like queueBackendSync but only flushes the attendance table.
+   Saves 3-5 MB of unchanged rows on every attendance click. */
+function queueAttendanceSync(){ clearTimeout(syncTimer); syncTimer=setTimeout(syncAttendanceOnly,250); }
 
 /* Single-flight hydration: concurrent callers share one promise so the
    whole master-data download can never run twice at once. */
@@ -606,11 +638,18 @@ function installSaveHook(){
   const original=window.saveData;
   if(!original || original.__lfWrapped)return;
   const ATT_MUTATORS=/changeAttendanceStatus|changeOvertime|markAllWorked|submitAttendance|approveAttendance|verifyAttendanceRecord|verifyAllWorked|setJtsStatus|changeJtsHours|changeJtsOt|editSupervisorRecord|cancelSupervisorRecord|markSupervisorPresent|generateJtsRoster|ensureJtsRosterForDate/;
-  const wrapped=function(){ const stack=new Error().stack||''; const renderSave=/renderDashboard|renderAttendance|renderApproval|renderJtsAttendance|renderJtsHistory|renderJtsPayroll|renderWorkers/.test(stack); original(); if(renderSave||syncBusy)return; if(ATT_MUTATORS.test(stack)){ queueBackendSync(); return; } localStorage.setItem('labourforce_cloud_dirty','1'); queueBackendSync(); };
+  // ATT_MUTATORS now use queueAttendanceSync() instead of queueBackendSync(),
+  // which only syncs the attendance table — workers/departments/clients/requests
+  // are NOT re-uploaded on every attendance click. This saves 3-5 MB of
+  // unchanged master data per attendance write.
+  const wrapped=function(){ const stack=new Error().stack||''; const renderSave=/renderDashboard|renderAttendance|renderApproval|renderJtsAttendance|renderJtsHistory|renderJtsPayroll|renderWorkers/.test(stack); original(); if(renderSave||syncBusy)return; if(ATT_MUTATORS.test(stack)){ queueAttendanceSync(); return; } localStorage.setItem('labourforce_cloud_dirty','1'); queueBackendSync(); };
   wrapped.__lfWrapped=true; window.saveData=wrapped;
 }
 
 (async function bootLabourForceCloud(){
+  // Honour ?refresh=1 by clearing caches so newly-applied migrations that
+  // create views/tables (e.g. workers_public) are picked up without error noise.
+  try{ const u=new URLSearchParams(location.search); if(u.get('refresh')==='1'){ localStorage.removeItem('labourforce_missing_tables_v1'); localStorage.removeItem('labourforce_cloud_dirty'); } }catch(_){}
   ensureConnectionUI();
   bindAuthGate();
   if(typeof supabase==='undefined'){
@@ -620,16 +659,20 @@ function installSaveHook(){
     return;
   }
   labourForceSupabase=supabase.createClient(LABOUR_FORCE_SUPABASE_URL,LABOUR_FORCE_SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+  window.labourForceSupabase = labourForceSupabase;
   installSaveHook();
   localStorage.removeItem('labourforce_cloud_dirty');
   labourForceSupabase.auth.onAuthStateChange((_event,session)=>{ labourForceSession=session; handleSession(session); });
   const {data}=await labourForceSupabase.auth.getSession();
+  window.labourForceSession = data.session;
   await handleSession(data.session);
   window.addEventListener('online',()=>{ if(labourForceSession) syncLocalState(); });
   window.addEventListener('beforeunload',()=>{ if(labourForceSession && typeof takeAttendanceDirtyDates==='function'){ const remaining=takeAttendanceDirtyDates(); if(remaining.length)localStorage.setItem('labourforce_attendance_dirty_dates',JSON.stringify(remaining)); } if(labourForceSession) localStorage.setItem('labourforce_cloud_dirty','1'); });
 })();
 
 window.queueBackendSync=queueBackendSync;
+window.queueAttendanceSync=queueAttendanceSync;
+window.syncAttendanceOnly=syncAttendanceOnly;
 window.syncLocalState=syncLocalState;
 window.lfSignOut=lfSignOut;
 window.handleSession=handleSession;
