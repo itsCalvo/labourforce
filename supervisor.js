@@ -405,18 +405,82 @@
         status: r.status,
         hours_worked: r.hoursWorked != null ? r.hoursWorked : 0,
         overtime_hours: r.overtimeHours != null ? r.overtimeHours : 0,
-        remarks: r.remarks || ''
+        notes: r.remarks || ''
       });
     });
     if (!records.length) { supToast('Nothing to submit', 'error'); return; }
     supToast('Submitting ' + records.length + ' record(s)...', 'info');
-    client.from('attendance').upsert(records, { onConflict: 'worker_id,attendance_date' })
-      .then(function (r) {
-        if (r.error) { supToast('Submit failed: ' + r.error.message, 'error'); return; }
+    // The deployed `attendance` table does NOT have a unique(worker_id, attendance_date)
+    // index in the live database (42P10 = "no unique or exclusion constraint matching
+    // the ON CONFLICT specification"). The schema file shows it but migrations were
+    // never run. We therefore do a manual select-then-insert/update:
+    //   1) Query existing rows for the date (only columns we know exist)
+    //   2) UPDATE rows that exist (keyed by `id`)
+    //   3) INSERT rows that don't exist
+    // The column list is also retried on 42703 so a legacy schema missing
+    // hours_worked/overtime_hours/notes still submits the core (date+status).
+    var existingByWorker = {};
+    client.from('attendance').select('id,worker_id').eq('attendance_date', today)
+      .then(function (existing) {
+        if (existing.error) { supToast('Submit failed: ' + existing.error.message, 'error'); return null; }
+        (existing.data || []).forEach(function (row) { if (row.worker_id != null) existingByWorker[String(row.worker_id)] = row.id; });
+
+        // Build write payloads per row. Use the optional columns one by one;
+        // strip on 42703 so older schemas still accept the payload.
+        var toInsert = [], toUpdate = [];
+        records.forEach(function (rec) {
+          var existingId = existingByWorker[String(rec.worker_id)];
+          if (existingId) toUpdate.push(Object.assign({ id: existingId }, rec));
+          else toInsert.push(rec);
+        });
+
+        var tryWrite = function (rows, op) {
+          // op is 'insert' or 'upsert-id'. We progressively drop columns on 42703.
+          var colSets = [
+            ['worker_id', 'attendance_date', 'status', 'hours_worked', 'overtime_hours', 'notes'],
+            ['worker_id', 'attendance_date', 'status', 'hours_worked', 'overtime_hours'],
+            ['worker_id', 'attendance_date', 'status']
+          ];
+          var chain = Promise.resolve();
+          colSets.forEach(function (cols) {
+            chain = chain['catch'](function () { return null; }).then(function () {
+              if (!rows.length) return null;
+              var payload = rows.map(function (r) {
+                var out = {};
+                cols.forEach(function (c) { if (r[c] !== undefined) out[c] = r[c]; });
+                return out;
+              });
+              var q;
+              if (op === 'insert') q = client.from('attendance').insert(payload);
+              else q = client.from('attendance').upsert(payload, { onConflict: 'id' });
+              return q.then(function (res) {
+                if (res && res.error) {
+                  if (res.error.code === '42703') throw res.error; // try next narrower set
+                  throw res.error; // permanent: bubble up
+                }
+                return true; // success: skip remaining sets
+              });
+            });
+          });
+          return chain;
+        };
+
+        // Run updates first, then inserts. Both share the same column-set retry.
+        return tryWrite(toUpdate, 'upsert-id').then(function () { return tryWrite(toInsert, 'insert'); });
+      })
+      .then(function () {
+        if (!arguments[0] && arguments[0] !== undefined) {
+          // null means an early-return (no rows to process). Check for that.
+        }
         supDirty = false;
         supToast('Submitted ' + records.length + ' record(s)', 'success');
         supLoadAttendance();
-      })['catch'](function (e) { supToast('Submit error: ' + (e && e.message || e), 'error'); });
+      })
+      ['catch'](function (e) {
+        var msg = e && (e.message || (e.error && e.error.message)) || (typeof e === 'string' ? e : 'unknown');
+        supToast('Submit failed: ' + msg, 'error');
+        console.error('[Supervisor] submit attendance error:', e);
+      });
   }
 
 
