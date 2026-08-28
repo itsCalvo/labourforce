@@ -12,6 +12,36 @@ let syncTimer = null;
 let syncBusy = false;
 let pendingSync = false;
 const REMOTE_MAP_KEY = 'labourforce_remote_map_v2';
+/* Bug fix: a sync push that keeps failing (bad network, one bad row, an RLS
+   insert rejection, etc.) used to leave 'labourforce_cloud_dirty' stuck at
+   '1' forever — and hydrateFromBackend() bailed out before ever reading from
+   Supabase whenever that flag was set, so the UI could look permanently
+   empty even though the cloud data was fine. After LF_SYNC_FAIL_LIMIT
+   consecutive failures we stop blocking reads and show cloud data anyway,
+   with a manual "Retry sync" affordance to try pushing local changes again. */
+const LF_SYNC_FAIL_LIMIT = 3;
+function lfSyncFailCount(){ return Number(localStorage.getItem('labourforce_sync_fail_count')||0); }
+function updateRetrySyncVisibility(){
+  const btn=document.getElementById('lfRetrySyncBtn'); if(!btn)return;
+  btn.style.display = lfSyncFailCount()>=LF_SYNC_FAIL_LIMIT ? 'inline-block' : 'none';
+}
+
+/* Returns true when the current profile has workers.view_rates or rates.manage.
+   Used to gate the raw `workers` table read that reveals rate/classification data.
+   Guards Bug fix #1: without this check the raw workers read always fired (even
+   when RLS would block it for non-admin roles), silently returning [] and making
+   the workers list empty for every role except rate-permission holders. */
+function lfHasRatePermission(){
+  const profile=window.lfCurrentProfile;
+  if(profile && profile.permissions && Array.isArray(profile.permissions)){
+    const codes=profile.permissions.map(p=>p.code||p);
+    if(codes.includes('workers.view_rates')||codes.includes('rates.manage')) return true;
+  }
+  // Role-name fallback mirrors the has_permission() check in the RLS policy:
+  // both workers.view_rates and rates.manage are granted to administrator/super_admin
+  const role=String(window.lfCurrentRole||'').toLowerCase();
+  return role==='super_admin'||role==='administrator';
+}
 
 function lfMap(){
   try { return JSON.parse(localStorage.getItem(REMOTE_MAP_KEY) || '{}'); }
@@ -35,9 +65,16 @@ function ensureConnectionUI(){
   const panel=document.createElement('div'); panel.id='lfConnectionPanel'; panel.innerHTML=`
     <div class="lf-connection-dot"></div><div class="lf-connection-copy">
       <strong id="lfSyncStatus">Local-first mode</strong><span id="lfSyncDetail">Changes are saved on this device.</span>
-    </div><button id="lfLoginBtn" class="lf-connection-btn">Connect</button>`;
+    </div><button id="lfLoginBtn" class="lf-connection-btn">Connect</button><button id="lfRetrySyncBtn" class="lf-connection-btn" style="display:none" title="Local changes have failed to sync repeatedly — retry pushing them to Supabase">Retry sync</button>`;
   document.body.appendChild(panel);
   document.getElementById('lfLoginBtn').onclick=showAuthGate;
+  document.getElementById('lfRetrySyncBtn').onclick=async()=>{
+    localStorage.setItem('labourforce_sync_fail_count','0');
+    updateRetrySyncVisibility();
+    await syncLocalState();
+    await hydrateFromBackend();
+  };
+  updateRetrySyncVisibility();
 }
 /* ---------- authentication gate ----------
    A full-screen sign-in is shown until a valid, active Labour Force
@@ -158,7 +195,18 @@ async function syncClients(){
     if(existingId) setRid('client',c.id,existingId);
     rows.push({id:existingId||rid('client',c.id),client_code:clientCode,name:c.name,contact_person:c.contact||null,phone:c.phone||null,email:c.email||null,address:c.address||null,active:c.active!==false,notes:c.notes||null});
   }
-  await upsertBatch('clients',rows);
+  /* Defensive: deployed clients table may not have all columns (older schema).
+     Iteratively drop any column the server reports as missing (42703). */
+  let clientDropCols=new Set();
+  for(let attempt=0;attempt<5;attempt++){
+    try{ await upsertBatch('clients',rows.map(r=>{ const o={...r}; clientDropCols.forEach(c=>delete o[c]); return o; })); break; }
+    catch(error){
+      if(error.code!=='42703') throw error;
+      const match=(error.message||'').match(/'([a-z_]+)'/);
+      if(!match) throw error;
+      clientDropCols.add(match[1]);
+    }
+  }
 }
 async function syncDepartments(){
   const {data:existing,error}=await labourForceSupabase.from('departments').select('id,name');
@@ -177,7 +225,20 @@ async function syncDepartments(){
   }
   departments=uniqueDepartments;
   const rows=departments.map(d=>({id:rid('department',d.name),name:d.name,parent_id:d.parent?deptRemote(d.parent):null,default_daily_rate:Number(d.rate||0),default_overtime_rate:Number(d.otRate||0),active:d.active!==false}));
-  try{await upsertBatch('departments',rows);}catch(error){if(error.code!=='42703')throw error;await upsertBatch('departments',rows.map(({default_daily_rate,default_overtime_rate,...row})=>row));}
+  /* The deployed `departments` table may not have the rate/parent/active columns
+     (older schema). Strip any column that the server reports as missing — but
+     do it iteratively so a schema with only some of the columns doesn't still
+     trip the upsert. Each retry drops one more column from the row. */
+  let dropCols=new Set();
+  for(let attempt=0;attempt<5;attempt++){
+    try{ await upsertBatch('departments',rows.map(r=>{ const o={...r}; dropCols.forEach(c=>delete o[c]); return o; })); break; }
+    catch(error){
+      if(error.code!=='42703') throw error;
+      const match=(error.message||'').match(/'([a-z_]+)'/);
+      if(!match) throw error;
+      dropCols.add(match[1]);
+    }
+  }
 }
 async function syncWorkers(){
   const {data:existing,error}=await labourForceSupabase.from('workers').select('id,employee_no,id_number');
@@ -402,13 +463,20 @@ async function syncLocalState(){
        supervisor/manager) flow into this cache instead of being only pushed. */
     await hydrateAttendanceFromBackend();
     localStorage.removeItem('labourforce_cloud_dirty');
+    localStorage.removeItem('labourforce_sync_fail_count');
+    localStorage.removeItem('labourforce_last_sync_error');
+    updateRetrySyncVisibility();
     toastSync('All changes saved to Supabase',true);
   }catch(error){
     console.error('[Labour Force] sync failed',error);
     pendingSync=false;
     clearTimeout(syncTimer);
+    const failCount=lfSyncFailCount()+1;
+    localStorage.setItem('labourforce_sync_fail_count',String(failCount));
+    localStorage.setItem('labourforce_last_sync_error',error.message||'request failed');
+    updateRetrySyncVisibility();
     toastSync('Cloud sync paused');
-    const detail=document.getElementById('lfSyncDetail'); if(detail) detail.textContent=`Sync error: ${error.message||'request failed'}`;
+    const detail=document.getElementById('lfSyncDetail'); if(detail) detail.textContent=`Sync error (attempt ${failCount}): ${error.message||'request failed'}`;
   }finally{ syncBusy=false; }
 }
 function queueBackendSync(){ clearTimeout(syncTimer); syncTimer=setTimeout(syncLocalState,450); }
@@ -420,28 +488,90 @@ async function hydrateFromBackend(){
   if(!labourForceSession)return;
   if(lfHydrateInFlight)return lfHydrateInFlight;
   lfHydrateInFlight=(async()=>{
+    let stuckAfterRepeatedFailures=false;
     if(localStorage.getItem('labourforce_cloud_dirty')==='1'){
-      await syncLocalState();
-      if(localStorage.getItem('labourforce_cloud_dirty')==='1') return;
+      if(lfSyncFailCount()<LF_SYNC_FAIL_LIMIT){
+        await syncLocalState();
+        if(localStorage.getItem('labourforce_cloud_dirty')==='1' && lfSyncFailCount()<LF_SYNC_FAIL_LIMIT) return;
+      }
+      /* Bug fix: previously we returned here unconditionally whenever the
+         dirty flag was still set, so a push that failed even once could
+         block cloud reads forever. Once we've retried LF_SYNC_FAIL_LIMIT
+         times, stop blocking and read cloud data anyway — an out-of-date
+         "can't sync my edits" warning is far less confusing than an app
+         that silently looks empty. */
+      if(localStorage.getItem('labourforce_cloud_dirty')==='1'){
+        stuckAfterRepeatedFailures=true;
+        console.warn('[Labour Force] local changes have not synced after repeated failures — reading cloud data anyway instead of staying blocked.');
+      }
     }
     try{
-      const [rc,rd,rw,rr]=await Promise.all([
+      /* Phase 1: read the general-access tables. workers_public is the rates-hidden
+         view (policy using(true)) so every authenticated user can see the worker list.
+         The raw `workers` table's SELECT policy only lets rows through for profiles
+         with workers.view_rates or rates.manage — so we must NOT read it unconditionally:
+         a non-rate role would get a silent empty array back, making the UI look empty.
+         Instead we gate the second read on the client-side permission check. */
+      const [rc,rd,rwPublic,rr]=await Promise.all([
         safeTableRows('clients','id,client_code,name,contact_person,phone,active'),
         safeTableRows('departments','id,name,parent_id,default_daily_rate,default_overtime_rate,active'),
-        safeTableRows('workers','id,employee_no,full_name,phone,national_id,id_number,kra_pin,nssf_number,shif_number,account_number,department_id,classification,designation,daily_rate,overtime_rate,join_date,source_sheet,active,notes'),
+        safeTableRows('workers_public','id,staff_no,id_number,name,department,designation,active,created_at,updated_at'),
         safeTableRows('labour_requests','id,request_no,client_id,department_id,classification,workers_required,start_date,end_date,shift,notes,status')]);
+      /* Phase 2: only attempt the raw `workers` read (which exposes rate/classification
+         and other admin-only fields) when the signed-in profile is permitted to see
+         them. This second read is allowed to come back empty (RLS-filtered) without
+         blocking anything else. */
+      let rwRates=[]; let ratesLoaded=false;
+      if(lfHasRatePermission()){
+        rwRates=await safeTableRows('workers','id,employee_no,full_name,phone,national_id,id_number,kra_pin,nssf_number,shif_number,account_number,department_id,classification,designation,daily_rate,overtime_rate,join_date,source_sheet,active,notes');
+        ratesLoaded=true;
+      }
+      /* Safety net: if workers_public returned 0 rows, the view may not be deployed
+         on this instance (older schema). In that case, try the raw `workers` table
+         as a best-effort fallback even for non-rate roles — RLS will still filter
+         out rate/classification fields for users without permission, but at least
+         the worker list won't be empty. This preserves the rate-hiding design
+         intent (RLS enforces it server-side) while preventing a permanently empty
+         workers list when the view is missing. */
+      if(!rwPublic.length && !rwRates.length){
+        const fallback=await safeTableRows('workers','id,employee_no,full_name,phone,national_id,id_number,department_id,active');
+        if(fallback.length){ rwRates=fallback; ratesLoaded=true; }
+      }
       const map=lfMap();
+      /* Merge: workers_public supplies the rows every authenticated user can
+         see; the raw `workers` read (rwRates) overlays rate/extended fields
+         when the signed-in profile is permitted to see them. If
+         workers_public itself isn't deployed/readable (older schema), fall
+         back to whatever the raw table returned so this still degrades to
+         the old behaviour instead of losing data outright. */
+      const rateById=new Map(rwRates.map(w=>[String(w.id),w]));
+      const rw = rwPublic.length ? rwPublic.map(pub=>{
+        const rate=rateById.get(String(pub.id))||{};
+        return {
+          id:pub.id, employee_no:rate.employee_no||pub.staff_no, staff_no:pub.staff_no,
+          full_name:rate.full_name||pub.name, name:pub.name, phone:rate.phone||null,
+          national_id:rate.national_id||pub.id_number||null, id_number:pub.id_number||rate.id_number||null,
+          kra_pin:rate.kra_pin||null, nssf_number:rate.nssf_number||null, shif_number:rate.shif_number||null,
+          account_number:rate.account_number||null, department_id:rate.department_id||null, department:pub.department||null,
+          classification:rate.classification||null, designation:rate.designation||pub.designation||null,
+          daily_rate:rate.daily_rate, overtime_rate:rate.overtime_rate, join_date:rate.join_date||null,
+          source_sheet:rate.source_sheet||null, active:pub.active, notes:rate.notes||null
+        };
+      }) : rwRates;
       /* Diagnostics: surface exactly what the cloud returned for each master
          table. This makes the difference visible between (a) an empty cloud,
          (b) reads silently blocked by RLS/grants (safeTableRows -> []), or
          (c) real data replacing the local cache. Works regardless of whether
-         the arrays were big enough to be applied. */
-      window.__lfCloudCounts={clients:rc.length,departments:rd.length,workers:rw.length,requests:rr.length};
-      console.log('[Labour Force] cloud read counts (clients/departments/workers/requests):',
-        rc.length, rd.length, rw.length, rr.length);
+         the arrays were big enough to be applied. `workersRatesLoaded`
+         reports whether the rate-enriched raw `workers` read was even
+         attempted — useful future debugging to confirm a non-rate role
+         was correctly excluded from the rate path. */
+      window.__lfCloudCounts={clients:rc.length,departments:rd.length,workers:rw.length,workersPublic:rwPublic.length,workersRatesLoaded:ratesLoaded,requests:rr.length};
+      console.log('[Labour Force] cloud read counts (clients/departments/workers/workersPublic/workersRatesLoaded/requests):',
+        rc.length, rd.length, rw.length, rwPublic.length, ratesLoaded, rr.length);
       if(rc.length){ clients=rc.map(c=>{ let local=clients.find(x=>map.client?.[String(x.id)]===c.id); if(!local) local={id:Date.now()+Math.random()}; setRid('client',local.id,c.id); return {...local,name:c.name,contact:c.contact_person||'',phone:c.phone||'',active:c.active,clientCode:c.client_code}; }); }
       if(rd.length){ departments=rd.map(d=>{ let local=departments.find(x=>map.department?.[String(x.name)]===d.id)||departments.find(x=>x.name===d.name)||{name:d.name}; setRid('department',local.name,d.id); return {...local,name:d.name,parent:rd.find(p=>p.id===d.parent_id)?.name||'',rate:Number(d.default_daily_rate||local.rate||0),otRate:Number(d.default_overtime_rate||local.otRate||0),active:d.active}; }); }
-      if(rw.length){ workers=rw.map(w=>{ let local=workers.find(x=>map.worker?.[String(x.id)]===w.id)||workers.find(x=>x.id===w.id)||workers.find(x=>x.employeeNo===w.employee_no)||{id:Date.now()+Math.random()}; setRid('worker',local.id,w.id); return {...local,employeeNo:w.employee_no||w.staff_no||local.employeeNo,name:w.full_name||w.name||local.name,phone:w.phone||local.phone||'',nationalId:w.national_id||w.id_number||'',idNumber:w.id_number||w.national_id||'',kraPin:w.kra_pin||'',nssfNumber:w.nssf_number||'',shifNumber:w.shif_number||'',accountNumber:w.account_number||'',department:rd.find(d=>d.id===w.department_id)?.name||'Operations',classification:w.classification||local.classification||'Unskilled',designation:w.designation||'',rate:Number(w.daily_rate||w.override_rate_day||local.rate||0),otRate:Number(w.overtime_rate||w.override_rate_hour||local.otRate||0),joinDate:w.join_date||local.joinDate||'',workbookSource:w.source_sheet||'',active:w.active!==false,notes:w.notes||local.notes||''}; }); }
+      if(rw.length){ workers=rw.map(w=>{ let local=workers.find(x=>map.worker?.[String(x.id)]===w.id)||workers.find(x=>x.id===w.id)||workers.find(x=>x.employeeNo===w.employee_no)||{id:Date.now()+Math.random()}; setRid('worker',local.id,w.id); return {...local,employeeNo:w.employee_no||w.staff_no||local.employeeNo,name:w.full_name||w.name||local.name,phone:w.phone||local.phone||'',nationalId:w.national_id||w.id_number||'',idNumber:w.id_number||w.national_id||'',kraPin:w.kra_pin||'',nssfNumber:w.nssf_number||'',shifNumber:w.shif_number||'',accountNumber:w.account_number||'',department:w.department||rd.find(d=>d.id===w.department_id)?.name||local.department||'Operations',classification:w.classification||local.classification||'Unskilled',designation:w.designation||'',rate:Number(w.daily_rate||w.override_rate_day||local.rate||0),otRate:Number(w.overtime_rate||w.override_rate_hour||local.otRate||0),joinDate:w.join_date||local.joinDate||'',workbookSource:w.source_sheet||'',active:w.active!==false,notes:w.notes||local.notes||''}; }); }
       if(rr.length){ const statusMap={pending:'Pending',approved:'Approved',rejected:'Rejected',partially_fulfilled:'Allocated',fulfilled:'Completed',cancelled:'Cancelled'}; labourRequests=rr.map(r=>{let local=labourRequests.find(x=>map.request?.[String(x.id)]===r.id)||labourRequests.find(x=>x.requestNo===r.request_no)||{id:Date.now()+Math.random(),allocatedWorkerIds:[]}; setRid('request',local.id,r.id); return {...local,requestNo:r.request_no,clientId:rc.find(c=>String(c.id)===String(r.client_id))?.id||local.clientId,department:rd.find(d=>d.id===r.department_id)?.name||local.department||'',classification:r.classification||'',workersRequired:r.workers_required,startDate:r.start_date,duration:r.end_date?Math.max(1,Math.round((new Date(r.end_date)-new Date(r.start_date))/86400000)+1):1,shift:r.shift||'Day',notes:r.notes||'',status:statusMap[r.status]||'Pending'}; }); }
       localStorage.setItem('labourforce_workers',JSON.stringify(workers)); localStorage.setItem('labourforce_departments',JSON.stringify(departments)); localStorage.setItem('labourforce_clients',JSON.stringify(clients)); localStorage.setItem('labourforce_requests',JSON.stringify(labourRequests));
       if(typeof lfDataVersion==='number')lfDataVersion++;
@@ -452,11 +582,17 @@ async function hydrateFromBackend(){
         if(typeof renderDashboard==='function')renderDashboard(); if(typeof renderWorkers==='function'&&document.getElementById('workersTable'))renderWorkers(); if(typeof renderClients==='function'&&document.getElementById('clientsTable'))renderClients(); if(typeof renderDepartments==='function'&&document.getElementById('departmentsTable'))renderDepartments(); if(typeof renderRequests==='function'&&document.getElementById('requestsTable'))renderRequests();
       }catch(renderError){ console.error('[Labour Force] render after hydrate failed (data was still saved locally ok)', renderError); }
       syncBusy=false;
-      localStorage.removeItem('labourforce_cloud_dirty');
       const counts=window.__lfCloudCounts||{};
-      toastSync('Cloud read OK',true);
+      updateRetrySyncVisibility();
       const detailEl=document.getElementById('lfSyncDetail');
-      if(detailEl) detailEl.textContent=`Cloud rows → clients:${counts.clients} depts:${counts.departments} workers:${counts.workers} requests:${counts.requests}`;
+      if(stuckAfterRepeatedFailures){
+        toastSync('Cloud read OK — local edits not syncing');
+        if(detailEl) detailEl.textContent=`Local changes failed to sync (${lfSyncFailCount()} attempts) — last error: ${localStorage.getItem('labourforce_last_sync_error')||'unknown'}. Showing latest cloud data. Click Retry sync to try again. Cloud rows → clients:${counts.clients} depts:${counts.departments} workers:${counts.workers}${counts.workersRatesLoaded?'':' (rates hidden)'} requests:${counts.requests}`;
+      } else {
+        localStorage.removeItem('labourforce_cloud_dirty');
+        toastSync('Cloud read OK',true);
+        if(detailEl) detailEl.textContent=`Cloud rows → clients:${counts.clients} depts:${counts.departments} workers:${counts.workers}${counts.workersRatesLoaded?'':' (rates hidden)'} requests:${counts.requests}`;
+      }
     }catch(error){ console.error('[Labour Force] hydrate failed',error); const msg=error?.message||'request failed'; toastSync('Cloud read failed: '+msg); const detail=document.getElementById('lfSyncDetail'); if(detail)detail.textContent='Hydrate error: '+msg; }
   })();
   try{ return await lfHydrateInFlight; } finally{ lfHydrateInFlight=null; }
