@@ -4,6 +4,10 @@
 
   var supSession = null, supProfile = null, supWorkers = [], supAttendance = {};
   var supSelectedDate = null, supDirty = false;
+  // Local cache: department_id → name. The workers table stores department_id (FK),
+  // not a name, so we resolve the name client-side once after sign-in. Safe to keep
+  // empty if the departments table is missing — we just display an empty department.
+  var supDepartments = {}; // { [departmentId]: name }
 
   function supInitClient() {
     // Preferred: client already initialized by supabase.js (boots async, may not be ready on first try)
@@ -27,12 +31,16 @@
   }
 
   function mapWorkerRow(row) {
+    // Resolve department_id → name from the local cache (loaded once in supShowPortal).
+    // If departments haven't loaded yet, fall back to empty string.
+    var deptId = row.department_id != null ? String(row.department_id) : null;
+    var deptName = (deptId && supDepartments[deptId]) ? supDepartments[deptId] : '';
     return {
       id: row.id,
       name: row.full_name || row.name || row.fullname || '(no name)',
       employeeNo: row.employee_no || row.staff_no || row.employeeNumber || '',
       idNumber: row.id_number || row.national_id || row.nationalId || '',
-      department: row.department || row.department_name || '',
+      department: deptName,
       _active: row.active
     };
   }
@@ -134,7 +142,35 @@
     if (nameEl) nameEl.textContent = displayName;
     if (metaEl) metaEl.textContent = role ? role + ' - Supervisor Portal' : 'Supervisor Portal';
     if (avatarEl) avatarEl.textContent = displayName.charAt(0).toUpperCase();
+    // Load departments (for resolving department_id → name in worker rows).
+    // Failure is non-fatal: the worker list still renders, just with empty
+    // department cells. This must NOT block attendance from loading.
+    supLoadDepartments();
     supLoadWorkersAndAttendance();
+  }
+
+  // ---- Department cache (for displaying department names) ----
+  function supLoadDepartments() {
+    var client = supInitClient();
+    if (!client) return;
+    // Try a rich select first; if the schema is older and one of these columns
+    // is missing, fall back to `*` so a missing column never blocks the search.
+    var tryLoad = function (select) {
+      return client.from('departments').select(select);
+    };
+    tryLoad('id,name').then(function (result) {
+      if (result && result.error) throw result.error;
+      var map = {};
+      (result.data || []).forEach(function (d) { if (d && d.id != null) map[String(d.id)] = d.name || ''; });
+      supDepartments = map;
+    })['catch'](function (e1) {
+      tryLoad('*').then(function (result2) {
+        if (result2 && result2.error) { console.warn('[Supervisor] departments read failed:', result2.error.message); return; }
+        var map2 = {};
+        (result2.data || []).forEach(function (d) { if (d && d.id != null) map2[String(d.id)] = d.name || ''; });
+        supDepartments = map2;
+      })['catch'](function (e2) { console.warn('[Supervisor] departments read error:', e2 && e2.message || e2); });
+    });
   }
 
 ﻿
@@ -286,7 +322,7 @@
     // RLS on the `workers` table returns only rows the current profile may see.
     // Only request the columns we actually use to minimise payload.
     client.from('workers')
-      .select('id,employee_no,id_number,full_name,department,active')
+      .select('id,employee_no,id_number,full_name,department_id,active')
       .or('full_name.ilike.' + ilike + ',employee_no.ilike.' + ilike + ',id_number.ilike.' + ilike)
       .limit(20)
       .then(function (result) {

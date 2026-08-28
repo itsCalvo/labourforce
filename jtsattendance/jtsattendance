@@ -20,6 +20,6 @@
 <script src="config.js"></script>
 <script src="data.js"></script>
 <script src="jtsattendance.js"></script>
-<script src="supabase.js?v=20260829080000"></script>
+<script src="supabase.js?v=20260829100000"></script>
 </body>
 </html>

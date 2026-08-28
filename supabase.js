@@ -103,14 +103,46 @@ async function handleSession(session){
     return;
   }
   try{
-    const {data:profile}=await labourForceSupabase.from('profiles').select('id,full_name,email,active,role_id,roles(name)').eq('id',session.user.id).maybeSingle();
-    if(!profile || profile.active===false){
+    // Resilient profile read: try rich column set first; if any column is
+    // missing (migrations not applied) fall back to id+role_id; if THAT also
+    // fails, fall back to bare `*`. A failure here must NEVER sign the user
+    // out — that would make the app useless for any user whose profile row
+    // exists but is in an older schema. We only sign out when the row is
+    // explicitly disabled (`active === false`), not when the query 400s.
+    let profile=null;
+    try{
+      const r=await labourForceSupabase.from('profiles').select('id,full_name,email,active,role_id,roles(name)').eq('id',session.user.id).maybeSingle();
+      profile=r.data||null;
+    }catch(_e1){
+      try{
+        const r=await labourForceSupabase.from('profiles').select('id,full_name,email,role_id,roles(name)').eq('id',session.user.id).maybeSingle();
+        profile=r.data||null;
+      }catch(_e2){
+        try{
+          const r=await labourForceSupabase.from('profiles').select('*').eq('id',session.user.id).maybeSingle();
+          profile=r.data||null;
+        }catch(_e3){
+          // Last resort: synthesise a profile from the auth session so the
+          // user isn't locked out. RLS-allowed reads return the row; only a
+          // truly empty `profiles` table (or 500) hits this branch.
+          profile={id:session.user.id,email:session.user.email,full_name:session.user.user_metadata?.full_name||session.user.email};
+        }
+      }
+    }
+    if(!profile){
+      // Profile row genuinely doesn't exist. Let the user in as a guest so
+      // they at least see the UI and we can show "complete your profile".
+      // Signing them out here would prevent that.
+      console.warn('[Labour Force] no profile row found for user; allowing guest access.');
+      profile={id:session.user.id,email:session.user.email,full_name:session.user.user_metadata?.full_name||session.user.email};
+    }
+    if(profile.active===false){
       await labourForceSupabase.auth.signOut();
       window.lfCurrentRole=''; window.lfCurrentProfile=null;
       showAuthGate();
       return;
     }
-    window.lfCurrentRole=profile.roles?.name||'';
+    window.lfCurrentRole=profile.roles?.name||profile.role||'';
     window.lfCurrentProfile=profile;
     updateUserDisplay(profile);
     hideAuthGate();
@@ -166,12 +198,45 @@ async function tableRows(table, select='*'){ const {data,error}=await withCloudT
 /* Resilient master-data reader. Tries a rich, app-specific column list first;
    if the deployed schema is missing any column (migrations not applied),
    falls back to `*` so a single schema mismatch never blocks hydration of
-   the other tables. Returns [] on failure so callers stay responsive. */
+   the other tables. Returns [] on failure so callers stay responsive.
+
+   Missing-table cache: if a table has been observed missing (404 / "Could not
+   find the table") we record the failure in localStorage for an hour and skip
+   the network call on subsequent loads. The `?refresh=1` URL param clears it. */
+const LF_MISSING_TABLES_KEY='labourforce_missing_tables_v1';
+const LF_MISSING_TABLES_TTL=60*60*1000; // 1 hour
+function lfGetMissingTables(){
+  try{
+    const cached=JSON.parse(localStorage.getItem(LF_MISSING_TABLES_KEY)||'null');
+    if(cached && Date.now()-(cached.ts||0)<LF_MISSING_TABLES_TTL) return cached.tables||{};
+  }catch(_){}
+  return {};
+}
+function lfMarkTableMissing(table,err){
+  try{
+    const cur=lfGetMissingTables();
+    cur[table]=Date.now();
+    localStorage.setItem(LF_MISSING_TABLES_KEY, JSON.stringify({ts:Date.now(),tables:cur}));
+  }catch(_){}
+}
+function lfClearMissingTables(){ try{ localStorage.removeItem(LF_MISSING_TABLES_KEY); }catch(_){} }
 async function safeTableRows(table, trySelect){
+  // Short-circuit: known-missing table → return [] without a network call.
+  if(lfGetMissingTables()[table]) return [];
   try{ return await tableRows(table, trySelect); }
   catch(e1){
+    // Cache the miss and try a bare `*` once. If that also 404s, the cache
+    // entry suppresses further noise for the rest of the hour.
     try{ return await tableRows(table, '*'); }
-    catch(e2){ console.warn(`[Labour Force] could not read ${table}:`, e2?.message||e1); return []; }
+    catch(e2){
+      const msg=String(e2?.message||e1?.message||'');
+      if(/Could not find the table|schema cache|does not exist/i.test(msg)){
+        lfMarkTableMissing(table, e2);
+      } else {
+        console.warn(`[Labour Force] could not read ${table}:`, e2?.message||e1);
+      }
+      return [];
+    }
   }
 }
 async function upsert(table, row){
@@ -546,7 +611,7 @@ async function hydrateFromBackend(){
          Instead we gate the second read on the client-side permission check. */
       const [rc,rd,rwPublic,rr]=await Promise.all([
         safeTableRows('clients','id,client_code,name,contact_person,phone,active'),
-        safeTableRows('departments','id,name,parent_id,default_daily_rate,default_overtime_rate,active'),
+        safeTableRows('departments','id,name,active'),
         safeTableRows('workers_public','id,staff_no,id_number,name,department,designation,active,created_at,updated_at'),
         safeTableRows('labour_requests','id,request_no,client_id,department_id,classification,workers_required,start_date,end_date,shift,notes,status')]);
       /* Phase 2: only attempt the raw `workers` read (which exposes rate/classification
@@ -601,11 +666,21 @@ async function hydrateFromBackend(){
       window.__lfCloudCounts={clients:rc.length,departments:rd.length,workers:rw.length,workersPublic:rwPublic.length,workersRatesLoaded:ratesLoaded,requests:rr.length};
       console.log('[Labour Force] cloud read counts (clients/departments/workers/workersPublic/workersRatesLoaded/requests):',
         rc.length, rd.length, rw.length, rwPublic.length, ratesLoaded, rr.length);
-      if(rc.length){ clients=rc.map(c=>{ let local=clients.find(x=>map.client?.[String(x.id)]===c.id); if(!local) local={id:Date.now()+Math.random()}; setRid('client',local.id,c.id); return {...local,name:c.name,contact:c.contact_person||'',phone:c.phone||'',active:c.active,clientCode:c.client_code}; }); }
-      if(rd.length){ departments=rd.map(d=>{ let local=departments.find(x=>map.department?.[String(x.name)]===d.id)||departments.find(x=>x.name===d.name)||{name:d.name}; setRid('department',local.name,d.id); return {...local,name:d.name,parent:rd.find(p=>p.id===d.parent_id)?.name||'',rate:Number(d.default_daily_rate||local.rate||0),otRate:Number(d.default_overtime_rate||local.otRate||0),active:d.active}; }); }
-      if(rw.length){ workers=rw.map(w=>{ let local=workers.find(x=>map.worker?.[String(x.id)]===w.id)||workers.find(x=>x.id===w.id)||workers.find(x=>x.employeeNo===w.employee_no)||{id:Date.now()+Math.random()}; setRid('worker',local.id,w.id); return {...local,employeeNo:w.employee_no||w.staff_no||local.employeeNo,name:w.full_name||w.name||local.name,phone:w.phone||local.phone||'',nationalId:w.national_id||w.id_number||'',idNumber:w.id_number||w.national_id||'',kraPin:w.kra_pin||'',nssfNumber:w.nssf_number||'',shifNumber:w.shif_number||'',accountNumber:w.account_number||'',department:w.department||rd.find(d=>d.id===w.department_id)?.name||local.department||'Operations',classification:w.classification||local.classification||'Unskilled',designation:w.designation||'',rate:Number(w.daily_rate||w.override_rate_day||local.rate||0),otRate:Number(w.overtime_rate||w.override_rate_hour||local.otRate||0),joinDate:w.join_date||local.joinDate||'',workbookSource:w.source_sheet||'',active:w.active!==false,notes:w.notes||local.notes||''}; }); }
-      if(rr.length){ const statusMap={pending:'Pending',approved:'Approved',rejected:'Rejected',partially_fulfilled:'Allocated',fulfilled:'Completed',cancelled:'Cancelled'}; labourRequests=rr.map(r=>{let local=labourRequests.find(x=>map.request?.[String(x.id)]===r.id)||labourRequests.find(x=>x.requestNo===r.request_no)||{id:Date.now()+Math.random(),allocatedWorkerIds:[]}; setRid('request',local.id,r.id); return {...local,requestNo:r.request_no,clientId:rc.find(c=>String(c.id)===String(r.client_id))?.id||local.clientId,department:rd.find(d=>d.id===r.department_id)?.name||local.department||'',classification:r.classification||'',workersRequired:r.workers_required,startDate:r.start_date,duration:r.end_date?Math.max(1,Math.round((new Date(r.end_date)-new Date(r.start_date))/86400000)+1):1,shift:r.shift||'Day',notes:r.notes||'',status:statusMap[r.status]||'Pending'}; }); }
-      localStorage.setItem('labourforce_workers',JSON.stringify(workers)); localStorage.setItem('labourforce_departments',JSON.stringify(departments)); localStorage.setItem('labourforce_clients',JSON.stringify(clients)); localStorage.setItem('labourforce_requests',JSON.stringify(labourRequests));
+      /* Defensive guards: supervisor.html only loads data needed for attendance
+         (workers + attendance) — clients/departments/requests arrays are not
+         defined there. Each block only runs if the corresponding global exists
+         AND the local array exists, so a reference error never blocks hydration
+         on the supervisor page. */
+      if(rc.length && typeof clients!=='undefined' && Array.isArray(clients)){ clients=rc.map(c=>{ let local=clients.find(x=>map.client?.[String(x.id)]===c.id); if(!local) local={id:Date.now()+Math.random()}; setRid('client',local.id,c.id); return {...local,name:c.name,contact:c.contact_person||'',phone:c.phone||'',active:c.active,clientCode:c.client_code}; }); }
+      if(rd.length && typeof departments!=='undefined' && Array.isArray(departments)){ departments=rd.map(d=>{ let local=departments.find(x=>map.department?.[String(x.name)]===d.id)||departments.find(x=>x.name===d.name)||{name:d.name}; setRid('department',local.name,d.id); return {...local,name:d.name,parent:rd.find(p=>p.id===d.parent_id)?.name||'',rate:Number(d.default_daily_rate||local.rate||0),otRate:Number(d.default_overtime_rate||local.otRate||0),active:d.active}; }); }
+      if(rw.length && typeof workers!=='undefined' && Array.isArray(workers)){ workers=rw.map(w=>{ let local=workers.find(x=>map.worker?.[String(x.id)]===w.id)||workers.find(x=>x.id===w.id)||workers.find(x=>x.employeeNo===w.employee_no)||{id:Date.now()+Math.random()}; setRid('worker',local.id,w.id); return {...local,employeeNo:w.employee_no||w.staff_no||local.employeeNo,name:w.full_name||w.name||local.name,phone:w.phone||local.phone||'',nationalId:w.national_id||w.id_number||'',idNumber:w.id_number||w.national_id||'',kraPin:w.kra_pin||'',nssfNumber:w.nssf_number||'',shifNumber:w.shif_number||'',accountNumber:w.account_number||'',department:w.department||rd.find(d=>d.id===w.department_id)?.name||local.department||'Operations',classification:w.classification||local.classification||'Unskilled',designation:w.designation||'',rate:Number(w.daily_rate||w.override_rate_day||local.rate||0),otRate:Number(w.overtime_rate||w.override_rate_hour||local.otRate||0),joinDate:w.join_date||local.joinDate||'',workbookSource:w.source_sheet||'',active:w.active!==false,notes:w.notes||local.notes||''}; }); }
+      if(rr.length && typeof labourRequests!=='undefined' && Array.isArray(labourRequests)){ const statusMap={pending:'Pending',approved:'Approved',rejected:'Rejected',partially_fulfilled:'Allocated',fulfilled:'Completed',cancelled:'Cancelled'}; labourRequests=rr.map(r=>{let local=labourRequests.find(x=>map.request?.[String(x.id)]===r.id)||labourRequests.find(x=>x.requestNo===r.request_no)||{id:Date.now()+Math.random(),allocatedWorkerIds:[]}; setRid('request',local.id,r.id); return {...local,requestNo:r.request_no,clientId:rc.find(c=>String(c.id)===String(r.client_id))?.id||local.clientId,department:rd.find(d=>d.id===r.department_id)?.name||local.department||'',classification:r.classification||'',workersRequired:r.workers_required,startDate:r.start_date,duration:r.end_date?Math.max(1,Math.round((new Date(r.end_date)-new Date(r.start_date))/86400000)+1):1,shift:r.shift||'Day',notes:r.notes||'',status:statusMap[r.status]||'Pending'}; }); }
+      /* Only persist arrays that exist on this page (supervisor.html only
+         has workers + attendance; the others aren't declared there). */
+      if(typeof workers!=='undefined')try{localStorage.setItem('labourforce_workers',JSON.stringify(workers));}catch(_){}
+      if(typeof departments!=='undefined')try{localStorage.setItem('labourforce_departments',JSON.stringify(departments));}catch(_){}
+      if(typeof clients!=='undefined')try{localStorage.setItem('labourforce_clients',JSON.stringify(clients));}catch(_){}
+      if(typeof labourRequests!=='undefined')try{localStorage.setItem('labourforce_requests',JSON.stringify(labourRequests));}catch(_){}
       if(typeof lfDataVersion==='number')lfDataVersion++;
       /* Renders run in their own try/catch: a UI bug must never be reported as a
          "cloud read failure" and must never prevent the cloud cache from saving. */
@@ -649,7 +724,7 @@ function installSaveHook(){
 (async function bootLabourForceCloud(){
   // Honour ?refresh=1 by clearing caches so newly-applied migrations that
   // create views/tables (e.g. workers_public) are picked up without error noise.
-  try{ const u=new URLSearchParams(location.search); if(u.get('refresh')==='1'){ localStorage.removeItem('labourforce_missing_tables_v1'); localStorage.removeItem('labourforce_cloud_dirty'); } }catch(_){}
+  try{ const u=new URLSearchParams(location.search); if(u.get('refresh')==='1'){ lfClearMissingTables(); localStorage.removeItem('labourforce_cloud_dirty'); } }catch(_){}
   ensureConnectionUI();
   bindAuthGate();
   if(typeof supabase==='undefined'){

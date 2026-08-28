@@ -104,7 +104,8 @@ input[type="checkbox"]{width:15px;height:15px;cursor:pointer;accent-color:var(--
 #supToast.success{border-color:var(--accent2);color:var(--accent2)}
 
 /* Auth gate */
-.sup-auth-gate{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9000;padding:20px}
+.sup-auth-gate{position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:9000;padding:20px}
+.sup-auth-gate.show{display:flex}
 .sup-auth-card{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:28px;width:min(400px,100%);text-align:center}
 .sup-auth-logo{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:24px}
 .sup-auth-logo-mark{width:36px;height:36px;background:var(--accent);border-radius:10px;display:grid;place-items:center;font-size:17px;font-weight:700;color:#fff}
@@ -223,7 +224,7 @@ input[type="checkbox"]{width:15px;height:15px;cursor:pointer;accent-color:var(--
 <div id="supToast" class="sup-toast"></div>
 <script src="vendor/supabase.min.js"></script>
 <script src="config.js?v=20260829020000"></script>
-<script src="supabase.js?v=20260829080000"></script>
-<script src="supervisor.js?v=20260829060000"></script>
+<script src="supabase.js?v=20260829100000"></script>
+<script src="supervisor.js?v=20260829110000"></script>
 </body>
 </html>
