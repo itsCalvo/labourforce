@@ -69,6 +69,8 @@ function saveData(){
  lfDataVersion++;
  localStorage.setItem("labourforce_jts_deduction_rates",JSON.stringify(jtsDeductionRates)); clearTimeout(saveDataTimer);
  saveDataTimer=setTimeout(()=>{localStorage.setItem("labourforce_workers",JSON.stringify(workers));localStorage.setItem("labourforce_departments",JSON.stringify(departments));localStorage.setItem("labourforce_clients",JSON.stringify(clients));localStorage.setItem("labourforce_requests",JSON.stringify(labourRequests));localStorage.setItem("labourforce_attendance",JSON.stringify(attendance));localStorage.setItem("labourforce_payroll",JSON.stringify(payroll));localStorage.setItem("labourforce_jts_state",JSON.stringify(jtsState));},150);
+ /* Phase 2: fire direct Supabase writes */
+ try{if(typeof window.lfSaveWorkers==='function')window.lfSaveWorkers();if(typeof window.lfSaveClients==='function')window.lfSaveClients();if(typeof window.lfSaveDepartments==='function')window.lfSaveDepartments();if(typeof window.lfSaveRequests==='function')window.lfSaveRequests();if(typeof window.lfSaveDeployments==='function')window.lfSaveDeployments();if(typeof window.lfSaveAudit==='function')window.lfSaveAudit();const dEl=document.getElementById('attendanceDate')||document.getElementById('supervisorDate')||document.getElementById('jtsDate');if(dEl&&dEl.value&&typeof window.lfSaveAttendanceDate==='function')window.lfSaveAttendanceDate(dEl.value);}catch(e){}
 }
 
 // Cloud-sync watcher to keep local attendance cache in sync with Supabase

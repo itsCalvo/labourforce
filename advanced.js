@@ -11,13 +11,14 @@ let auditLog = JSON.parse(localStorage.getItem('labourforce_audit')) || [];
 function saveAdvanced(){
   localStorage.setItem('labourforce_deployments', JSON.stringify(deployments));
   localStorage.setItem('labourforce_audit', JSON.stringify(auditLog));
+  try{if(typeof window.lfSaveDeployments==='function')window.lfSaveDeployments();if(typeof window.lfSaveAudit==='function')window.lfSaveAudit();}catch(e){}
 }
 
 function audit(action, reference, details, oldData=null, newData=null){
   auditLog.unshift({id:crypto.randomUUID?crypto.randomUUID():Date.now()+Math.random(), time:new Date().toISOString(), action, reference, details, oldData, newData, tableName:'operations'});
   auditLog=auditLog.slice(0,500);
   saveAdvanced();
-  if(typeof queueBackendSync==='function') queueBackendSync();
+  if(typeof window.lfSaveAudit!=='function'){if(typeof queueBackendSync==='function')queueBackendSync();}
 }
 
 function activeDeployment(workerId){

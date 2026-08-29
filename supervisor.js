@@ -8,6 +8,8 @@
   // not a name, so we resolve the name client-side once after sign-in. Safe to keep
   // empty if the departments table is missing — we just display an empty department.
   var supDepartments = {}; // { [departmentId]: name }
+  // Canonical attendance statuses matching the database CHECK constraint
+  var validStatuses = ['pending','present','absent','late','half_day','excused','off_day','pending_verification','worked','approved'];
 
   function supInitClient() {
     // Preferred: client already initialized by supabase.js (boots async, may not be ready on first try)
@@ -398,7 +400,7 @@
     var records = [];
     Object.keys(supAttendance).forEach(function (wid) {
       var r = supAttendance[wid];
-      if (!r || r.status === 'pending') return;
+      if (!r || r.status === 'pending' || r.status == null || !validStatuses.includes(r.status)) return;
       records.push({
         worker_id: wid,
         attendance_date: today,
@@ -469,9 +471,6 @@
         return tryWrite(toUpdate, 'upsert-id').then(function () { return tryWrite(toInsert, 'insert'); });
       })
       .then(function () {
-        if (!arguments[0] && arguments[0] !== undefined) {
-          // null means an early-return (no rows to process). Check for that.
-        }
         supDirty = false;
         supToast('Submitted ' + records.length + ' record(s)', 'success');
         supLoadAttendance();
@@ -595,7 +594,7 @@
     var remarks = prompt('Remarks:', r.remarks || '');
     if (remarks === null) return;
     supAttendance[String(workerId)] = {
-      status: r.status === 'pending' ? 'present' : r.status,
+      status: r.status === 'pending' ? 'present' : (validStatuses.includes(r.status) ? r.status : 'present'),
       hoursWorked: parseFloat(hours) || 0,
       overtimeHours: parseFloat(ot) || 0,
       remarks: remarks

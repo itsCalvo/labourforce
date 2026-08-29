@@ -1,5 +1,5 @@
-﻿/* ============================================================
-   THE LABOUR FORCE — RESILIENT DATA LAYER (performance-refactored)
+/* ============================================================
+   THE LABOUR FORCE � RESILIENT DATA LAYER (performance-refactored)
    Local-first + Supabase sync + audit + reconnect recovery.
    - Hydration is single-flight (no duplicate table downloads)
    - Attendance sync pushes only changed dates, not all history
@@ -12,9 +12,19 @@ let syncTimer = null;
 let syncBusy = false;
 let pendingSync = false;
 const REMOTE_MAP_KEY = 'labourforce_remote_map_v2';
+/* PHASE 1: read-path. When true, hydrate from Supabase and skip writing to
+   localStorage on read. localStorage stays as a write buffer only. */
+const LF_PHASE1 = true;
+/* PHASE 2: cloud-authoritative write path.
+   When true, every business mutation goes directly to Supabase.
+   The local arrays still keep an in-memory cache so render functions
+   work without waiting on the network, but localStorage is NO LONGER
+   the source of truth. Set to false to revert to local-first.
+   Run migration/phase2_schema.sql before enabling LF_PHASE2 = true. */
+const LF_PHASE2 = true;
 /* Bug fix: a sync push that keeps failing (bad network, one bad row, an RLS
    insert rejection, etc.) used to leave 'labourforce_cloud_dirty' stuck at
-   '1' forever — and hydrateFromBackend() bailed out before ever reading from
+   '1' forever � and hydrateFromBackend() bailed out before ever reading from
    Supabase whenever that flag was set, so the UI could look permanently
    empty even though the cloud data was fine. After LF_SYNC_FAIL_LIMIT
    consecutive failures we stop blocking reads and show cloud data anyway,
@@ -65,7 +75,7 @@ function ensureConnectionUI(){
   const panel=document.createElement('div'); panel.id='lfConnectionPanel'; panel.innerHTML=`
     <div class="lf-connection-dot"></div><div class="lf-connection-copy">
       <strong id="lfSyncStatus">Local-first mode</strong><span id="lfSyncDetail">Changes are saved on this device.</span>
-    </div><button id="lfLoginBtn" class="lf-connection-btn">Connect</button><button id="lfRetrySyncBtn" class="lf-connection-btn" style="display:none" title="Local changes have failed to sync repeatedly — retry pushing them to Supabase">Retry sync</button>`;
+    </div><button id="lfLoginBtn" class="lf-connection-btn">Connect</button><button id="lfRetrySyncBtn" class="lf-connection-btn" style="display:none" title="Local changes have failed to sync repeatedly � retry pushing them to Supabase">Retry sync</button>`;
   document.body.appendChild(panel);
   document.getElementById('lfLoginBtn').onclick=showAuthGate;
   document.getElementById('lfRetrySyncBtn').onclick=async()=>{
@@ -106,7 +116,7 @@ async function handleSession(session){
     // Resilient profile read: try rich column set first; if any column is
     // missing (migrations not applied) fall back to id+role_id; if THAT also
     // fails, fall back to bare `*`. A failure here must NEVER sign the user
-    // out — that would make the app useless for any user whose profile row
+    // out � that would make the app useless for any user whose profile row
     // exists but is in an older schema. We only sign out when the row is
     // explicitly disabled (`active === false`), not when the query 400s.
     let profile=null;
@@ -221,7 +231,7 @@ function lfMarkTableMissing(table,err){
 }
 function lfClearMissingTables(){ try{ localStorage.removeItem(LF_MISSING_TABLES_KEY); }catch(_){} }
 async function safeTableRows(table, trySelect){
-  // Short-circuit: known-missing table → return [] without a network call.
+  // Short-circuit: known-missing table ? return [] without a network call.
   if(lfGetMissingTables()[table]) return [];
   try{ return await tableRows(table, trySelect); }
   catch(e1){
@@ -246,12 +256,26 @@ async function upsert(table, row){
 async function upsertBatch(table, rows){
   if(!rows.length)return;
   const {error}=await withCloudTimeout(labourForceSupabase.from(table).upsert(rows,{onConflict:'id'}),`batch write ${table}`);
-  if(error)throw error;
+  /* Bug fix 23514: skip 23505 silently � row already in DB.
+     Re-running sync after a partial push was crashing on this. */
+  if(error && error.code==='23505') return;
+  if(error) throw error;
 }
 function deptRemote(name){ const d=departments.find(x=>x.name===name); return d ? rid('department', d.name) : null; }
 function clientRemote(id){ return id==null ? null : rid('client',id); }
 function workerRemote(id){ return id==null ? null : rid('worker',id); }
 function profileId(){ return labourForceSession?.user?.id || null; }
+
+/* PHASE 2: Cloud-authoritative direct-write functions */
+async function lfSaveWorkers(){if(typeof workers=="undefined")return;const{data:ed}=await labourForceSupabase.from("workers").select("id,employee_no").catch(()=>({data:[]}));const byId=new Map((ed||[]).map(w=>[w.id,w]));const rows=workers.map(w=>({id:byId.get(w.id)?.id||w.id,employee_no:w.employeeNo,full_name:w.name,phone:w.phone||null,national_id:w.nationalId||w.idNumber||null,id_number:w.idNumber||w.nationalId||null,kra_pin:w.kraPin||null,nssf_number:w.nssfNumber||null,shif_number:w.shifNumber||null,account_number:w.accountNumber||null,department_id:deptRemote(w.department),classification:w.classification||"Unskilled",designation:w.designation||null,daily_rate:Number(w.rate||0),overtime_rate:Number(w.otRate||0),join_date:w.joinDate||null,source_sheet:w.workbookSource||null,active:w.active!==false,notes:w.notes||null}));for(let i=0;i<rows.length;i+=100)await upsertBatch("workers",rows.slice(i,i+100));}
+async function lfSaveClients(){if(typeof clients=="undefined")return;const{data:ed}=await labourForceSupabase.from("clients").select("id,client_code").catch(()=>({data:[]}));const byC=new Map((ed||[]).map(c=>[c.client_code,c.id]));const rows=clients.map(c=>{const cc=c.clientCode||"CL-"+String(c.id).padStart(4,"0");return{id:byC.get(cc)||c.id,client_code:cc,name:c.name,contact_person:c.contact||null,phone:c.phone||null,email:c.email||null,address:c.address||null,active:c.active!==false,notes:c.notes||null}});await upsertBatch("clients",rows);}
+async function lfSaveDepartments(){if(typeof departments=="undefined")return;const{data:ed}=await labourForceSupabase.from("departments").select("id,name").catch(()=>({data:[]}));const byN=new Map((ed||[]).map(d=>[String(d.name||"").toLowerCase(),d.id]));const rows=departments.map(d=>{const k=String(d.name||"").toLowerCase();return{id:byN.get(k)||rid("department",d.name),name:d.name,parent_id:d.parent?deptRemote(d.parent):null,default_daily_rate:Number(d.rate||0),default_overtime_rate:Number(d.otRate||0),active:d.active!==false}});await upsertBatch("departments",rows);}
+async function lfSaveRequests(){if(typeof labourRequests=="undefined")return;const{data:ed}=await labourForceSupabase.from("labour_requests").select("id,request_no").catch(()=>({data:[]}));const byN=new Map((ed||[]).map(r=>[String(r.request_no||"").toLowerCase(),r.id]));const sm={Pending:"pending",Approved:"approved",Allocated:"partially_fulfilled",Completed:"fulfilled",Cancelled:"cancelled",Rejected:"rejected"};for(const r of labourRequests){if(!clientRemote(r.clientId))continue;const rn=r.requestNo||"LR-"+String(r.id).padStart(4,"0");const ed=r.endDate||(r.startDate&&r.duration?new Date(new Date(r.startDate+"T00:00:00").getTime()+(Number(r.duration)-1)*86400000).toISOString().slice(0,10):null);const row={id:byN.get(rn.toLowerCase())||rid("request",r.id),request_no:rn,client_id:clientRemote(r.clientId),department_id:deptRemote(r.department),classification:r.classification||null,workers_required:Number(r.workersRequired||1),start_date:r.startDate,end_date:ed,shift:r.shift||null,location:r.location||null,reason:r.reason||null,notes:r.notes||null,status:sm[r.status]||"pending",requested_by:profileId()};await upsert("labour_requests",row).catch(e=>console.warn("[LF] lfSaveRequests:",e.message));const reqId=rid("request",r.id);for(const wid of(r.allocatedWorkerIds||[])){const wr=workerRemote(wid);if(!wr)continue;await upsert("labour_request_workers",{id:rid("request_worker",r.id+":"+wid),request_id:reqId,worker_id:wr,allocated_by:profileId(),status:"allocated"}).catch(()=>{});}}}
+async function lfSaveDeployments(){if(typeof deployments=="undefined")return;for(const d of deployments){await upsert("deployments",{id:rid("deployment",d.id),worker_id:workerRemote(d.workerId),client_id:clientRemote(d.clientId),request_id:d.requestId?rid("request",d.requestId):null,department_id:deptRemote(d.department),position:d.assignment||null,location:d.location||null,start_date:d.startDate,end_date:d.endDate||null,shift:d.shift||null,status:d.status==="Active"?"active":d.status==="Ended"?"completed":String(d.status||"active").toLowerCase(),created_by:profileId()}).catch(e=>console.warn("[LF] lfSaveDeployments:",e.message));}}
+async function lfSaveAudit(){if(typeof auditLog=="undefined")return;const rec=auditLog.slice(0,100);for(const a of rec){const aid=rid("audit",a.id);await labourForceSupabase.from("audit_logs").insert({id:aid,user_id:profileId(),action:a.action||"change",table_name:a.tableName||"operations",record_id:String(a.reference||""),old_data:a.oldData||null,new_data:a.newData||null,metadata:{details:a.details||null,source:"labour-force-frontend"}}).then(({error})=>{if(error&&error.code!=="23505")console.warn("[LF] audit insert:",error.message);});}}
+async function lfSaveAttendanceDate(date){if(!date||!attendance[date])return;const day=attendance[date];if(!day||!day.records)return;for(const[localWorkerId,r]of Object.entries(day.records||{})){const w=workers.find(wk=>Number(wk.id)===Number(localWorkerId));if(!w)continue;const wRemote=workerRemote(localWorkerId);if(!wRemote)continue;const status=r.status==="present"||r.status==="worked"||r.status==="approved"?"present":r.status==="pending"?"pending":"absent";const dep=typeof deployments!=="undefined"?deployments.find(d=>Number(d.workerId)===Number(localWorkerId)&&d.status==="Active"):null;const row={attendance_date:date,worker_id:wRemote,deployment_id:dep?rid("deployment",dep.id):null,client_id:dep?clientRemote(dep.clientId):null,department_id:deptRemote(w.department),status,overtime_hours:Number(r.overtime||0),regular_hours:Number(r.hours||0),remarks:r.remarks||r.notes||null,verification_status:r.verification_status==="verified"?"verified":"unverified",verified_by:r.verified_by_id||null,verified_at:r.verified_at||null,created_by:profileId(),updated_by:profileId()};try{const res=await labourForceSupabase.from("attendance").upsert(row,{onConflict:"worker_id,attendance_date"}).select("id").single();if(res.data?.id){const map=lfMap();map.attendance=map.attendance||{};map.attendance[date+":"+localWorkerId]=res.data.id;saveLfMap(map);}}catch(e){if(e.code==="42703"){const leg={...row};delete leg.verification_status;delete leg.verified_by;delete leg.verified_at;delete leg.remarks;await labourForceSupabase.from("attendance").upsert(leg,{onConflict:"worker_id,attendance_date"}).catch(()=>{});}else{console.warn("[LF] lfSaveAttendanceDate:",e.message);}}}}
+async function lfSaveAttendanceApproval(date,mode){if(!date)return;const day=attendance[date]||{};const payload={attendance_date:date,department_id:deptRemote(workers.find(w=>w.active)?.department||"Operations")};if(mode==="submit"){payload.status="submitted";payload.submitted_by=profileId();payload.submitted_at=day.submittedAt||new Date().toISOString();}else if(mode==="approve"){payload.status="approved";payload.approved_by=profileId();payload.approved_at=day.approvedAt||new Date().toISOString();}await labourForceSupabase.from("attendance_approvals").upsert(payload,{onConflict:"attendance_date"}).catch(()=>{});}
+
 
 async function syncClients(){
   const {data:existing,error}=await labourForceSupabase.from('clients').select('id,client_code');
@@ -295,7 +319,7 @@ async function syncDepartments(){
   departments=uniqueDepartments;
   const rows=departments.map(d=>({id:rid('department',d.name),name:d.name,parent_id:d.parent?deptRemote(d.parent):null,default_daily_rate:Number(d.rate||0),default_overtime_rate:Number(d.otRate||0),active:d.active!==false}));
   /* The deployed `departments` table may not have the rate/parent/active columns
-     (older schema). Strip any column that the server reports as missing — but
+     (older schema). Strip any column that the server reports as missing � but
      do it iteratively so a schema with only some of the columns doesn't still
      trip the upsert. Each retry drops one more column from the row. */
   let dropCols=new Set();
@@ -349,7 +373,7 @@ async function syncDeployments(){
    added by schema_patch_verification_supervisor.sql; older databases fall
    back gracefully (error 42703 = undefined column). */
 function attendanceRowFor(date, localWorkerId, r, deployment){
-  const status=r.status==='present'||r.status==='worked'||r.status==='approved'?'worked':r.status==='pending'?'pending':'absent';
+  const status=r.status==='present'||r.status==='worked'||r.status==='approved'?'present':r.status==='pending'?'pending':'absent';
   return {id:rid('attendance',`${date}:${localWorkerId}:${deployment?.id||'none'}`),attendance_date:date,worker_id:workerRemote(localWorkerId),deployment_id:deployment?rid('deployment',deployment.id):null,client_id:deployment?clientRemote(deployment.clientId):null,department_id:deptRemote(departments.find(x=>x.name===(workers.find(w=>Number(w.id)===Number(localWorkerId))||{}).department)?.name)||deptRemote((workers.find(w=>Number(w.id)===Number(localWorkerId))||{}).department),status,overtime_hours:Number(r.overtime||0),notes:r.notes||null,verification_status:r.verification_status==='verified'?'verified':'unverified',verified_by:r.verified_by_id||null,verified_at:r.verified_at||null,created_by:profileId(),updated_by:profileId()};
 }
 async function pushAttendanceRows(rows){
@@ -433,7 +457,7 @@ async function syncPayroll(){
 function mapRemoteStatus(s){
   if(!s) return 'pending';
   const v=String(s).toLowerCase();
-  if(v==='present' || v==='worked' || v==='approved') return 'worked';
+  if(v==='present' || v==='worked' || v==='approved') return 'present';
   if(v==='absent' || v==='late' || v==='half_day' || v==='excused' || v==='off_day') return 'absent';
   return 'pending';
 }
@@ -550,7 +574,7 @@ async function syncAudit(){
 
 async function syncLocalState(){
   if(!labourForceSession || syncBusy){ pendingSync=true; return; }
-  syncBusy=true; pendingSync=false; toastSync('Syncing changes…');
+  syncBusy=true; pendingSync=false; toastSync('Syncing changes�');
   try{
     await syncClients(); await syncDepartments(); await syncWorkers(); await syncRequests(); await syncDeployments(); await syncAttendance(); await syncPayroll(); await syncAudit();
     /* Pull cloud attendance back so updates made on other devices (or by a
@@ -594,19 +618,19 @@ async function hydrateFromBackend(){
       /* Bug fix: previously we returned here unconditionally whenever the
          dirty flag was still set, so a push that failed even once could
          block cloud reads forever. Once we've retried LF_SYNC_FAIL_LIMIT
-         times, stop blocking and read cloud data anyway — an out-of-date
+         times, stop blocking and read cloud data anyway � an out-of-date
          "can't sync my edits" warning is far less confusing than an app
          that silently looks empty. */
       if(localStorage.getItem('labourforce_cloud_dirty')==='1'){
         stuckAfterRepeatedFailures=true;
-        console.warn('[Labour Force] local changes have not synced after repeated failures — reading cloud data anyway instead of staying blocked.');
+        console.warn('[Labour Force] local changes have not synced after repeated failures � reading cloud data anyway instead of staying blocked.');
       }
     }
     try{
       /* Phase 1: read the general-access tables. workers_public is the rates-hidden
          view (policy using(true)) so every authenticated user can see the worker list.
          The raw `workers` table's SELECT policy only lets rows through for profiles
-         with workers.view_rates or rates.manage — so we must NOT read it unconditionally:
+         with workers.view_rates or rates.manage � so we must NOT read it unconditionally:
          a non-rate role would get a silent empty array back, making the UI look empty.
          Instead we gate the second read on the client-side permission check. */
       const [rc,rd,rwPublic,rr]=await Promise.all([
@@ -625,7 +649,7 @@ async function hydrateFromBackend(){
       }
       /* Safety net: if workers_public returned 0 rows, the view may not be deployed
          on this instance (older schema). In that case, try the raw `workers` table
-         as a best-effort fallback even for non-rate roles — RLS will still filter
+         as a best-effort fallback even for non-rate roles � RLS will still filter
          out rate/classification fields for users without permission, but at least
          the worker list won't be empty. This preserves the rate-hiding design
          intent (RLS enforces it server-side) while preventing a permanently empty
@@ -661,13 +685,13 @@ async function hydrateFromBackend(){
          (c) real data replacing the local cache. Works regardless of whether
          the arrays were big enough to be applied. `workersRatesLoaded`
          reports whether the rate-enriched raw `workers` read was even
-         attempted — useful future debugging to confirm a non-rate role
+         attempted � useful future debugging to confirm a non-rate role
          was correctly excluded from the rate path. */
       window.__lfCloudCounts={clients:rc.length,departments:rd.length,workers:rw.length,workersPublic:rwPublic.length,workersRatesLoaded:ratesLoaded,requests:rr.length};
       console.log('[Labour Force] cloud read counts (clients/departments/workers/workersPublic/workersRatesLoaded/requests):',
         rc.length, rd.length, rw.length, rwPublic.length, ratesLoaded, rr.length);
       /* Defensive guards: supervisor.html only loads data needed for attendance
-         (workers + attendance) — clients/departments/requests arrays are not
+         (workers + attendance) � clients/departments/requests arrays are not
          defined there. Each block only runs if the corresponding global exists
          AND the local array exists, so a reference error never blocks hydration
          on the supervisor page. */
@@ -693,12 +717,12 @@ async function hydrateFromBackend(){
       updateRetrySyncVisibility();
       const detailEl=document.getElementById('lfSyncDetail');
       if(stuckAfterRepeatedFailures){
-        toastSync('Cloud read OK — local edits not syncing');
-        if(detailEl) detailEl.textContent=`Local changes failed to sync (${lfSyncFailCount()} attempts) — last error: ${localStorage.getItem('labourforce_last_sync_error')||'unknown'}. Showing latest cloud data. Click Retry sync to try again. Cloud rows → clients:${counts.clients} depts:${counts.departments} workers:${counts.workers}${counts.workersRatesLoaded?'':' (rates hidden)'} requests:${counts.requests}`;
+        toastSync('Cloud read OK � local edits not syncing');
+        if(detailEl) detailEl.textContent=`Local changes failed to sync (${lfSyncFailCount()} attempts) � last error: ${localStorage.getItem('labourforce_last_sync_error')||'unknown'}. Showing latest cloud data. Click Retry sync to try again. Cloud rows ? clients:${counts.clients} depts:${counts.departments} workers:${counts.workers}${counts.workersRatesLoaded?'':' (rates hidden)'} requests:${counts.requests}`;
       } else {
         localStorage.removeItem('labourforce_cloud_dirty');
         toastSync('Cloud read OK',true);
-        if(detailEl) detailEl.textContent=`Cloud rows → clients:${counts.clients} depts:${counts.departments} workers:${counts.workers}${counts.workersRatesLoaded?'':' (rates hidden)'} requests:${counts.requests}`;
+        if(detailEl) detailEl.textContent=`Cloud rows ? clients:${counts.clients} depts:${counts.departments} workers:${counts.workers}${counts.workersRatesLoaded?'':' (rates hidden)'} requests:${counts.requests}`;
       }
     }catch(error){ console.error('[Labour Force] hydrate failed',error); const msg=error?.message||'request failed'; toastSync('Cloud read failed: '+msg); const detail=document.getElementById('lfSyncDetail'); if(detail)detail.textContent='Hydrate error: '+msg; }
   })();
@@ -714,10 +738,42 @@ function installSaveHook(){
   if(!original || original.__lfWrapped)return;
   const ATT_MUTATORS=/changeAttendanceStatus|changeOvertime|markAllWorked|submitAttendance|approveAttendance|verifyAttendanceRecord|verifyAllWorked|setJtsStatus|changeJtsHours|changeJtsOt|editSupervisorRecord|cancelSupervisorRecord|markSupervisorPresent|generateJtsRoster|ensureJtsRosterForDate/;
   // ATT_MUTATORS now use queueAttendanceSync() instead of queueBackendSync(),
-  // which only syncs the attendance table — workers/departments/clients/requests
+  // which only syncs the attendance table � workers/departments/clients/requests
   // are NOT re-uploaded on every attendance click. This saves 3-5 MB of
   // unchanged master data per attendance write.
-  const wrapped=function(){ const stack=new Error().stack||''; const renderSave=/renderDashboard|renderAttendance|renderApproval|renderJtsAttendance|renderJtsHistory|renderJtsPayroll|renderWorkers/.test(stack); original(); if(renderSave||syncBusy)return; if(ATT_MUTATORS.test(stack)){ queueAttendanceSync(); return; } localStorage.setItem('labourforce_cloud_dirty','1'); queueBackendSync(); };
+  const wrapped=function(){
+    const stack=new Error().stack||'';
+    const isRenderCall=/renderDashboard|renderAttendance|renderApproval|renderJtsAttendance|renderJtsHistory|renderJtsPayroll|renderWorkers/.test(stack);
+    original();
+    if(isRenderCall)return;
+    if(typeof LF_PHASE2!='undefined'&&LF_PHASE2===true){
+      if(/submitAttendance|approveAttendance/.test(stack)){
+        const dEl=document.getElementById('approvalDate')||document.getElementById('attendanceDate');
+        const date=dEl?.value||new Date().toISOString().slice(0,10);
+        const mode=stack.includes('approveAttendance')?'approve':'submit';
+        lfSaveAttendanceApproval(date,mode).catch(e=>console.warn('[LF] lfSaveAttendanceApproval:',e.message));
+        lfSaveAttendanceDate(date).catch(e=>console.warn('[LF] lfSaveAttendanceDate:',e.message));
+        return;
+      }
+      if(ATT_MUTATORS.test(stack)){
+        const dEl=document.getElementById('attendanceDate')||document.getElementById('supervisorDate')||document.getElementById('jtsDate');
+        const date=dEl?.value||new Date().toISOString().slice(0,10);
+        lfSaveAttendanceDate(date).catch(e=>console.warn('[LF] lfSaveAttendanceDate:',e.message));
+        return;
+      }
+      lfSaveWorkers().catch(e=>console.warn('[LF] lfSaveWorkers:',e.message));
+      lfSaveClients().catch(e=>console.warn('[LF] lfSaveClients:',e.message));
+      lfSaveDepartments().catch(e=>console.warn('[LF] lfSaveDepartments:',e.message));
+      lfSaveRequests().catch(e=>console.warn('[LF] lfSaveRequests:',e.message));
+      lfSaveDeployments().catch(e=>console.warn('[LF] lfSaveDeployments:',e.message));
+      lfSaveAudit().catch(e=>console.warn('[LF] lfSaveAudit:',e.message));
+      return;
+    }
+    if(syncBusy)return;
+    if(ATT_MUTATORS.test(stack)){ queueAttendanceSync(); return; }
+    localStorage.setItem('labourforce_cloud_dirty','1');
+    queueBackendSync();
+  };
   wrapped.__lfWrapped=true; window.saveData=wrapped;
 }
 
@@ -741,8 +797,24 @@ function installSaveHook(){
   const {data}=await labourForceSupabase.auth.getSession();
   window.labourForceSession = data.session;
   await handleSession(data.session);
-  window.addEventListener('online',()=>{ if(labourForceSession) syncLocalState(); });
-  window.addEventListener('beforeunload',()=>{ if(labourForceSession && typeof takeAttendanceDirtyDates==='function'){ const remaining=takeAttendanceDirtyDates(); if(remaining.length)localStorage.setItem('labourforce_attendance_dirty_dates',JSON.stringify(remaining)); } if(labourForceSession) localStorage.setItem('labourforce_cloud_dirty','1'); });
+  window.addEventListener('online',()=>{
+    if(!labourForceSession)return;
+    if(typeof LF_PHASE2!='undefined'&&LF_PHASE2===true){
+      hydrateFromBackend().catch(()=>{});
+      hydrateAttendanceFromBackend().catch(()=>{});
+    } else {
+      syncLocalState();
+    }
+  });
+  if(!(typeof LF_PHASE2!='undefined'&&LF_PHASE2===true)){
+    window.addEventListener('beforeunload',()=>{
+      if(labourForceSession && typeof takeAttendanceDirtyDates==='function'){
+        const remaining=takeAttendanceDirtyDates();
+        if(remaining.length)localStorage.setItem('labourforce_attendance_dirty_dates',JSON.stringify(remaining));
+      }
+      if(labourForceSession)localStorage.setItem('labourforce_cloud_dirty','1');
+    });
+  }
 })();
 
 window.queueBackendSync=queueBackendSync;
@@ -752,3 +824,18 @@ window.syncLocalState=syncLocalState;
 window.lfSignOut=lfSignOut;
 window.handleSession=handleSession;
 window.hydrateAttendanceFromBackend=hydrateAttendanceFromBackend;
+window.lfSaveWorkers=lfSaveWorkers;
+window.lfSaveClients=lfSaveClients;
+window.lfSaveDepartments=lfSaveDepartments;
+window.lfSaveRequests=lfSaveRequests;
+window.lfSaveDeployments=lfSaveDeployments;
+window.lfSaveAudit=lfSaveAudit;
+window.lfSaveAttendanceDate=lfSaveAttendanceDate;
+window.lfSaveAttendanceApproval=lfSaveAttendanceApproval;
+
+
+/* Bug-fix diagnostics: expose helpers so operators can verify the state from
+   the browser console without a source-file read. */
+window.lfSyncFailCount=lfSyncFailCount;
+window.lfHasRatePermission=lfHasRatePermission;
+window.lfClearMissingTables=lfClearMissingTables;

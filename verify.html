@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<title>LabourForce - Verify Attendance</title>
+<meta name="description" content="Check your recorded work days">
+<style>
+:root{--vf-bg:#f4f6fa;--vf-surface:#ffffff;--vf-ink:#0b1220;--vf-ink-2:#1f2937;--vf-muted:#475569;--vf-border:#d8dee6;--vf-border-strong:#94a3b8;--vf-primary:#0b57d0;--vf-primary-pressed:#0849ab;--vf-primary-soft:#e3efff;--vf-danger:#b42318;--vf-danger-soft:#fee4e2;--vf-success:#027a48;--vf-success-soft:#d1fadf;--vf-warning:#b54708;--vf-warning-soft:#fef0c7;--vf-today-ring:#1d4ed8;--vf-shadow:0 1px 2px rgba(15,23,42,.06),0 4px 14px rgba(15,23,42,.04);--vf-radius:16px;--vf-radius-sm:10px;--vf-tap:48px}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+html{-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:var(--vf-bg);color:var(--vf-ink);min-height:100vh;min-height:100dvh;-webkit-font-smoothing:antialiased;line-height:1.5;font-size:16px}
+.vf-header{background:#0b1220;color:#fff;padding:14px 16px;padding-top:max(14px,env(safe-area-inset-top));display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 1px 0 rgba(255,255,255,.06)}
+.vf-logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:#fff;min-width:0}
+.vf-logo-mark{width:38px;height:38px;flex-shrink:0;background:linear-gradient(135deg,#2563eb,#1d4ed8);border-radius:10px;display:grid;place-items:center;font-size:16px;font-weight:800;color:#fff;box-shadow:0 2px 6px rgba(37,99,235,.4)}
+.vf-logo-text{font-size:15px;font-weight:700;letter-spacing:-.01em;min-width:0}
+.vf-logo-text small{display:block;font-size:11px;font-weight:500;color:#9ca3af;margin-top:1px;letter-spacing:.02em}
+.vf-header-action{background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.18);padding:10px 14px;border-radius:var(--vf-radius-sm);font-size:13px;font-weight:600;cursor:pointer;min-height:42px;display:none;font-family:inherit;transition:background .15s}
+.vf-header-action:hover{background:rgba(255,255,255,.16)}
+.vf-container{max-width:560px;margin:0 auto;padding:20px 16px 40px;padding-bottom:max(40px,env(safe-area-inset-bottom))}
+.vf-card{background:var(--vf-surface);border:1px solid var(--vf-border);border-radius:var(--vf-radius);padding:24px 20px;box-shadow:var(--vf-shadow)}
+.vf-eyebrow{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--vf-primary);background:var(--vf-primary-soft);padding:5px 10px;border-radius:999px;margin-bottom:14px}
+.vf-card h1{font-size:24px;font-weight:800;margin-bottom:8px;letter-spacing:-.02em;line-height:1.25}
+.vf-card .vf-sub{color:var(--vf-muted);font-size:15px;margin-bottom:24px;line-height:1.55}
+.vf-card .vf-sub strong{color:var(--vf-ink);font-weight:600}
+.vf-field{margin-bottom:18px}
+.vf-field label{display:block;font-size:14px;font-weight:600;color:var(--vf-ink-2);margin-bottom:8px}
+.vf-field input{width:100%;min-height:var(--vf-tap);padding:13px 16px;border:1.5px solid var(--vf-border-strong);border-radius:12px;font-size:16px;font-weight:500;background:#fff;color:var(--vf-ink);outline:none;transition:border-color .15s,box-shadow .15s;font-family:inherit;letter-spacing:.02em}
+.vf-field input::placeholder{color:#94a3b8;font-weight:400}
+.vf-field input:focus{border-color:var(--vf-primary);box-shadow:0 0 0 4px rgba(11,87,208,.15)}
+.vf-field input.upper{text-transform:uppercase}
+.vf-btn{width:100%;min-height:var(--vf-tap);padding:13px 18px;background:var(--vf-primary);color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;transition:background .15s,opacity .15s,transform .05s;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:8px;letter-spacing:.01em}
+.vf-btn:hover{background:var(--vf-primary-pressed)}
+.vf-btn:active{transform:scale(.98)}
+.vf-btn:disabled{opacity:.55;cursor:not-allowed}
+.vf-btn.secondary{background:#fff;color:var(--vf-ink-2);border:1.5px solid var(--vf-border-strong)}
+.vf-btn.secondary:hover{background:#f1f5f9}
+.vf-btn.ghost{background:transparent;color:var(--vf-muted);border:none;font-size:14px;font-weight:600;padding:10px 0;min-height:auto}
+.vf-btn.ghost:hover{color:var(--vf-ink)}
+.vf-error{background:var(--vf-danger-soft);color:var(--vf-danger);border:1.5px solid #fda29b;border-radius:12px;padding:12px 14px;font-size:14px;font-weight:500;margin-bottom:16px;display:none;line-height:1.45}
+.vf-error.show{display:flex;align-items:flex-start;gap:10px}
+.vf-error::before{content:"!";flex-shrink:0;width:22px;height:22px;border-radius:50%;background:var(--vf-danger);color:#fff;display:grid;place-items:center;font-size:13px;font-weight:800;margin-top:1px}
+.vf-secure{margin-top:18px;display:flex;align-items:center;justify-content:center;gap:6px;font-size:12px;color:var(--vf-muted);text-align:center}
+.vf-loading{display:none;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;text-align:center}
+.vf-loading.show{display:flex}
+.vf-spinner{width:44px;height:44px;border:3.5px solid #e2e8f0;border-top-color:var(--vf-primary);border-radius:50%;animation:vf-spin .9s linear infinite;margin-bottom:14px}
+@keyframes vf-spin{to{transform:rotate(360deg)}}
+.vf-loading p{color:var(--vf-muted);font-size:15px;font-weight:500}
+.vf-worker-bar{background:var(--vf-surface);border:1px solid var(--vf-border);border-radius:var(--vf-radius);padding:14px 16px;margin-bottom:18px;display:none;align-items:center;gap:12px;box-shadow:var(--vf-shadow)}
+.vf-worker-bar.show{display:flex}
+.vf-worker-avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;display:grid;place-items:center;font-size:19px;font-weight:800;flex-shrink:0;box-shadow:0 2px 8px rgba(37,99,235,.35)}
+.vf-worker-info{min-width:0;flex:1}
+.vf-worker-info strong{display:block;font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--vf-ink)}
+.vf-worker-info span{display:block;font-size:12px;color:var(--vf-muted);margin-top:2px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vf-worker-bar .vf-pill{flex-shrink:0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:var(--vf-success-soft);color:var(--vf-success);padding:4px 10px;border-radius:999px}
+.vf-month-nav{display:none;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
+.vf-month-nav.show{display:flex}
+.vf-month-btn{background:var(--vf-surface);color:var(--vf-ink-2);border:1.5px solid var(--vf-border-strong);border-radius:11px;min-width:90px;min-height:44px;padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:4px;transition:background .15s,border-color .15s}
+.vf-month-btn:hover{background:#f1f5f9;border-color:var(--vf-primary)}
+.vf-month-btn:disabled{opacity:.4;cursor:not-allowed}
+.vf-month-label{font-size:18px;font-weight:800;color:var(--vf-ink);letter-spacing:-.01em;text-align:center;flex:1}
+.vf-calendar{background:var(--vf-surface);border:1px solid var(--vf-border);border-radius:var(--vf-radius);padding:14px 10px 18px;box-shadow:var(--vf-shadow);margin-bottom:18px}
+.vf-cal-head{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:8px;padding:0 4px}
+.vf-cal-dow{text-align:center;font-size:11px;font-weight:700;color:var(--vf-muted);text-transform:uppercase;letter-spacing:.06em;padding:6px 0}
+.vf-cal-dow.weekend{color:var(--vf-warning)}
+.vf-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+.vf-cal-empty{aspect-ratio:1/1;min-height:42px}
+.vf-cal-day{position:relative;aspect-ratio:1/1;min-height:42px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#f8fafc;border:1.5px solid #e2e8f0;color:var(--vf-ink);font-size:15px;font-weight:700;line-height:1;transition:transform .12s}
+.vf-cal-day .vf-cal-num{font-size:15px;font-weight:700}
+.vf-cal-day .vf-cal-mark{font-size:12px;font-weight:800;margin-top:2px;line-height:1}
+.vf-cal-day.vf-worked{background:var(--vf-success-soft);border-color:#6ce9a6;color:var(--vf-success)}
+.vf-cal-day.vf-worked .vf-cal-mark{font-size:14px}
+.vf-cal-day.vf-absent{background:var(--vf-danger-soft);border-color:#fda29b;color:var(--vf-danger)}
+.vf-cal-day.vf-absent .vf-cal-mark{font-size:14px}
+.vf-cal-day.vf-pending{background:#fff;border-color:#e2e8f0;color:#94a3b8}
+.vf-cal-day.vf-pending .vf-cal-mark{font-size:14px;color:#cbd5e1}
+.vf-cal-day.vf-today{outline:3px solid var(--vf-today-ring);outline-offset:-3px;font-weight:800}
+.vf-cal-day.vf-future{opacity:.5}
+.vf-legend{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:18px}
+.vf-legend-item{background:var(--vf-surface);border:1.5px solid var(--vf-border);border-radius:12px;padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;font-size:12px;font-weight:600;color:var(--vf-ink-2)}
+.vf-legend-dot{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;font-size:15px;font-weight:800}
+.vf-legend-dot.vf-worked{background:var(--vf-success-soft);color:var(--vf-success)}
+.vf-legend-dot.vf-absent{background:var(--vf-danger-soft);color:var(--vf-danger)}
+.vf-legend-dot.vf-pending{background:#f1f5f9;color:#94a3b8}
+.vf-summary{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px}
+.vf-summary-stat{background:var(--vf-surface);border:1.5px solid var(--vf-border);border-radius:14px;padding:18px 14px;text-align:center}
+.vf-summary-stat .val{font-size:32px;font-weight:800;line-height:1;letter-spacing:-.02em;margin-bottom:6px;font-variant-numeric:tabular-nums}
+.vf-summary-stat .lbl{font-size:11px;font-weight:600;color:var(--vf-muted);text-transform:uppercase;letter-spacing:.06em}
+.vf-error-state{background:var(--vf-surface);border:1.5px solid var(--vf-border);border-radius:var(--vf-radius);padding:36px 22px;text-align:center;display:none;box-shadow:var(--vf-shadow)}
+.vf-error-state.show{display:block}
+.vf-error-state .ico{width:56px;height:56px;border-radius:50%;background:var(--vf-danger-soft);color:var(--vf-danger);display:grid;place-items:center;font-size:26px;font-weight:800;margin:0 auto 14px}
+.vf-error-state h2{font-size:18px;font-weight:700;margin-bottom:6px;color:var(--vf-ink)}
+.vf-error-state p{color:var(--vf-muted);font-size:14px;margin-bottom:18px;line-height:1.5}
+#vfAttendance{display:none}
+#vfAttendance.show{display:block}
+.vf-modal{position:fixed;inset:0;background:rgba(11,18,32,.6);display:none;align-items:flex-end;justify-content:center;z-index:200;-webkit-overflow-scrolling:touch}
+.vf-modal.show{display:flex}
+.vf-modal-card{width:100%;max-width:560px;background:#fff;border-radius:22px 22px 0 0;padding:20px 20px max(20px,env(safe-area-inset-bottom));box-shadow:0 -8px 30px rgba(0,0,0,.18);max-height:92vh;overflow-y:auto;animation:vf-slide-up .25s ease-out}
+@keyframes vf-slide-up{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.vf-modal-handle{width:36px;height:4px;background:#cbd5e1;border-radius:2px;margin:0 auto 14px}
+.vf-modal-close{position:absolute;top:14px;right:14px;width:38px;height:38px;border:0;background:#f1f5f9;border-radius:50%;font-size:18px;cursor:pointer;color:var(--vf-muted);display:grid;place-items:center;line-height:1}
+.vf-modal-close:hover{background:#e2e8f0;color:var(--vf-ink)}
+.vf-modal-card h2{font-size:20px;font-weight:800;margin-bottom:6px;letter-spacing:-.01em}
+.vf-modal-card .desc{color:var(--vf-muted);font-size:14px;margin-bottom:18px;line-height:1.5}
+.vf-modal-msg{border-radius:10px;padding:11px 13px;font-size:14px;font-weight:500;margin-bottom:14px;display:none;line-height:1.45}
+.vf-modal-msg.show{display:block}
+.vf-modal-msg.error{background:var(--vf-danger-soft);color:var(--vf-danger);border:1.5px solid #fda29b}
+.vf-modal-msg.success{background:var(--vf-success-soft);color:var(--vf-success);border:1.5px solid #6ce9a6}
+.vf-modal-actions{display:flex;gap:10px;margin-top:8px}
+.vf-modal-actions .vf-btn{flex:1;min-height:50px}
+@media(max-width:380px){.vf-card{padding:20px 16px}.vf-card h1{font-size:21px}.vf-cal-day{min-height:38px}.vf-cal-day .vf-cal-num{font-size:14px}.vf-summary-stat .val{font-size:26px}.vf-month-label{font-size:16px}}
+@media(min-width:600px){.vf-cal-day{min-height:54px}.vf-cal-day .vf-cal-num{font-size:16px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body>
+<header class="vf-header">
+  <a class="vf-logo" href="index.html">
+    <div class="vf-logo-mark">LF</div>
+    <div class="vf-logo-text">LabourForce<small>Attendance Verification</small></div>
+  </a>
+  <button class="vf-header-action" id="vfSignOut" onclick="vfSignOut()">Sign out</button>
+</header>
+<div class="vf-container">
+  <div id="vfLogin">
+    <div class="vf-card" style="margin-top:24px">
+      <div class="vf-eyebrow">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Worker Portal
+      </div>
+      <h1>Verify Your Work Days</h1>
+      <p class="vf-sub">Enter your <strong>National ID</strong> and <strong>password</strong> to view your attendance record for any month. First-time login password is <strong>jts</strong>.</p>
+      <div class="vf-error" id="vfLoginError"></div>
+      <div class="vf-field">
+        <label for="vfWorkerId">National ID</label>
+        <input id="vfWorkerId" type="text" placeholder="e.g. 12345678" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="numeric" pattern="[0-9A-Za-z]*">
+      </div>
+      <div class="vf-field">
+        <label for="vfPin">Password</label>
+        <input id="vfPin" type="password" placeholder="Default: jts (change after first login)" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </div>
+      <button class="vf-btn" id="vfLoginBtn" onclick="vfDoLogin()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+        Sign in
+      </button>
+      <button class="vf-btn secondary" style="margin-top:10px" onclick="window.location.href='index.html'">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        Admin portal
+      </button>
+      <div class="vf-secure">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Secured by LabourForce &middot; No data leaves your device
+      </div>
+    </div>
+  </div>
+  <div class="vf-loading" id="vfLoading">
+    <div class="vf-spinner"></div>
+    <p>Loading your attendance&hellip;</p>
+  </div>
+  <div class="vf-error-state" id="vfStateError">
+    <div class="ico">!</div>
+    <h2 id="vfStateErrorTitle">Something went wrong</h2>
+    <p id="vfStateErrorMsg">Unable to load your attendance. Please try again.</p>
+    <button class="vf-btn secondary" style="max-width:200px;margin:0 auto" onclick="vfRetry()">Try again</button>
+  </div>
+  <div id="vfAttendance">
+    <div class="vf-worker-bar" id="vfWorkerBar">
+      <div class="vf-worker-avatar" id="vfAvatar">?</div>
+      <div class="vf-worker-info">
+        <strong id="vfWorkerName">-</strong>
+        <span id="vfWorkerIdDisplay">-</span>
+      </div>
+      <span class="vf-pill">Verified</span>
+      <button class="vf-btn ghost" style="margin-left:auto;padding:8px 10px;min-height:38px;font-size:13px" onclick="vfOpenChangePin()">Change PIN</button>
+    </div>
+    <div class="vf-month-nav" id="vfMonthNav">
+      <button class="vf-month-btn" id="vfPrevMonth" onclick="vfChangeMonth(-1)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Prev
+      </button>
+      <span class="vf-month-label" id="vfMonthLabel">-</span>
+      <button class="vf-month-btn" id="vfNextMonth" onclick="vfChangeMonth(1)">
+        Next
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+    <div class="vf-calendar" id="vfCalendar">
+      <div class="vf-cal-head">
+        <div class="vf-cal-dow">Mon</div>
+        <div class="vf-cal-dow">Tue</div>
+        <div class="vf-cal-dow">Wed</div>
+        <div class="vf-cal-dow">Thu</div>
+        <div class="vf-cal-dow">Fri</div>
+        <div class="vf-cal-dow weekend">Sat</div>
+        <div class="vf-cal-dow weekend">Sun</div>
+      </div>
+      <div class="vf-cal-grid" id="vfCalGrid"></div>
+    </div>
+    <div class="vf-legend" id="vfLegend">
+      <div class="vf-legend-item">
+        <div class="vf-legend-dot vf-worked">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        Worked
+      </div>
+      <div class="vf-legend-item">
+        <div class="vf-legend-dot vf-absent">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </div>
+        Absent
+      </div>
+      <div class="vf-legend-item">
+        <div class="vf-legend-dot vf-pending">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/></svg>
+        </div>
+        Pending
+      </div>
+    </div>
+    <div class="vf-summary" id="vfSummary">
+      <div class="vf-summary-stat">
+        <div class="val" id="vfSummaryWorked" style="color:var(--vf-success)">-</div>
+        <div class="lbl">Worked</div>
+      </div>
+      <div class="vf-summary-stat">
+        <div class="val" id="vfSummaryAbsent" style="color:var(--vf-danger)">-</div>
+        <div class="lbl">Absent</div>
+      </div>
+    </div>
+    <button class="vf-btn ghost" style="margin-top:8px" onclick="vfSignOut()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      Sign out
+    </button>
+  </div>
+</div>
+<div class="vf-modal" id="vfPinModal" role="dialog" aria-modal="true" aria-labelledby="vfPinModalTitle">
+  <div class="vf-modal-card">
+    <div class="vf-modal-handle"></div>
+    <button class="vf-modal-close" onclick="vfCloseChangePin()" aria-label="Close">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <h2 id="vfPinModalTitle">Change Your Password</h2>
+    <p class="desc" id="vfPinModalDesc">Your new password must be at least 4 characters. You cannot reuse the default password "jts".</p>
+    <div class="vf-modal-msg" id="vfPinModalMsg"></div>
+    <div class="vf-field" id="vfOldPinField">
+      <label for="vfOldPin">Current Password</label>
+      <input id="vfOldPin" type="password" placeholder="Enter current password" autocomplete="off">
+    </div>
+    <div class="vf-field">
+      <label for="vfNewPin">New Password</label>
+      <input id="vfNewPin" type="password" placeholder="New password (min. 4 characters)" autocomplete="off">
+    </div>
+    <div class="vf-field">
+      <label for="vfConfirmPin">Confirm New Password</label>
+      <input id="vfConfirmPin" type="password" placeholder="Repeat new password" autocomplete="off">
+    </div>
+    <div class="vf-modal-actions">
+      <button class="vf-btn secondary" onclick="vfCloseChangePin()">Cancel</button>
+      <button class="vf-btn" id="vfSavePinBtn" onclick="vfSavePin()">Save Password</button>
+    </div>
+  </div>
+</div>
+<script src="vendor/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="verify.js"></script>
+</body>
+</html>
