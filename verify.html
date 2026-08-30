@@ -31,7 +31,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica N
 .vf-field input::placeholder{color:#94a3b8;font-weight:400}
 .vf-field input:focus{border-color:var(--vf-primary);box-shadow:0 0 0 4px rgba(11,87,208,.15)}
 .vf-field input.upper{text-transform:uppercase}
-.vf-btn{width:100%;min-height:var(--vf-tap);padding:13px 18px;background:var(--vf-primary);color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;transition:background .15s,opacity .15s,transform .05s;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:8px;letter-spacing:.01em}
+.vf-btn{width:100%;min-height:var(--vf-tap);padding:13px 18px;background:var(--vf-primary);color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;transition:background .15s,opacity .15s,transform .05s;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:8px;letter-spacing:.01em}.vf-btn.loading{position:relative;overflow:hidden}.vf-btn.loading .vf-btn-icon,.vf-btn.loading .vf-btn-text{opacity:0}.vf-btn-spinner{display:none;width:20px;height:20px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:vf-spin .7s linear infinite;position:absolute}.vf-btn.loading .vf-btn-spinner{display:block}@keyframes vf-spin{to{transform:rotate(360deg)}}
 .vf-btn:hover{background:var(--vf-primary-pressed)}
 .vf-btn:active{transform:scale(.98)}
 .vf-btn:disabled{opacity:.55;cursor:not-allowed}
@@ -43,7 +43,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica N
 .vf-error.show{display:flex;align-items:flex-start;gap:10px}
 .vf-error::before{content:"!";flex-shrink:0;width:22px;height:22px;border-radius:50%;background:var(--vf-danger);color:#fff;display:grid;place-items:center;font-size:13px;font-weight:800;margin-top:1px}
 .vf-secure{margin-top:18px;display:flex;align-items:center;justify-content:center;gap:6px;font-size:12px;color:var(--vf-muted);text-align:center}
-.vf-loading{display:none;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;text-align:center}
+.vf-loading{display:none;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;text-align:center}
 .vf-loading.show{display:flex}
 .vf-spinner{width:44px;height:44px;border:3.5px solid #e2e8f0;border-top-color:var(--vf-primary);border-radius:50%;animation:vf-spin .9s linear infinite;margin-bottom:14px}
 @keyframes vf-spin{to{transform:rotate(360deg)}}
@@ -65,18 +65,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica N
 .vf-cal-head{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:8px;padding:0 4px}
 .vf-cal-dow{text-align:center;font-size:11px;font-weight:700;color:var(--vf-muted);text-transform:uppercase;letter-spacing:.06em;padding:6px 0}
 .vf-cal-dow.weekend{color:var(--vf-warning)}
-.vf-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+.vf-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
 .vf-cal-empty{aspect-ratio:1/1;min-height:42px}
-.vf-cal-day{position:relative;aspect-ratio:1/1;min-height:42px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#f8fafc;border:1.5px solid #e2e8f0;color:var(--vf-ink);font-size:15px;font-weight:700;line-height:1;transition:transform .12s}
-.vf-cal-day .vf-cal-num{font-size:15px;font-weight:700}
-.vf-cal-day .vf-cal-mark{font-size:12px;font-weight:800;margin-top:2px;line-height:1}
-.vf-cal-day.vf-worked{background:var(--vf-success-soft);border-color:#6ce9a6;color:var(--vf-success)}
-.vf-cal-day.vf-worked .vf-cal-mark{font-size:14px}
-.vf-cal-day.vf-absent{background:var(--vf-danger-soft);border-color:#fda29b;color:var(--vf-danger)}
-.vf-cal-day.vf-absent .vf-cal-mark{font-size:14px}
-.vf-cal-day.vf-pending{background:#fff;border-color:#e2e8f0;color:#94a3b8}
-.vf-cal-day.vf-pending .vf-cal-mark{font-size:14px;color:#cbd5e1}
-.vf-cal-day.vf-today{outline:3px solid var(--vf-today-ring);outline-offset:-3px;font-weight:800}
+.vf-cal-day{position:relative;min-height:50px;height:50px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#fff;border:1px solid #e2e8f0;color:var(--vf-ink-2);font-size:14px;font-weight:600;line-height:1;transition:all .15s;cursor:default;box-shadow:0 1px 2px rgba(0,0,0,.02)}.vf-cal-day:hover{transform:translateY(-1px);box-shadow:0 2px 6px rgba(0,0,0,.06);border-color:#cbd5e1}
+.vf-cal-day .vf-cal-num{font-size:16px;font-weight:700;line-height:1.1}
+.vf-cal-day .vf-cal-mark{font-size:11px;font-weight:800;margin-top:3px;line-height:1;opacity:.9}
+.vf-cal-day.vf-worked{background:linear-gradient(135deg,#d1fadf,#a7f3d0);border-color:#34d399;color:#065f46;box-shadow:0 1px 3px rgba(52,211,153,.2)}
+.vf-cal-day.vf-worked .vf-cal-mark{font-size:13px;color:#047857}
+.vf-cal-day.vf-absent{background:linear-gradient(135deg,#fee4e2,#fecaca);border-color:#f87171;color:#991b1b;box-shadow:0 1px 3px rgba(248,113,113,.2)}
+.vf-cal-day.vf-absent .vf-cal-mark{font-size:13px;color:#b91c1c}
+.vf-cal-day.vf-pending{background:#f8fafc;border-color:#e2e8f0;color:#94a3b8}
+.vf-cal-day.vf-pending .vf-cal-mark{font-size:13px;color:#cbd5e1}
+.vf-cal-day.vf-today{outline:2.5px solid var(--vf-today-ring);outline-offset:-2.5px;font-weight:800;box-shadow:0 0 0 4px rgba(29,78,216,.15),0 2px 8px rgba(29,78,216,.2)}
 .vf-cal-day.vf-future{opacity:.5}
 .vf-legend{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:18px}
 .vf-legend-item{background:var(--vf-surface);border:1.5px solid var(--vf-border);border-radius:12px;padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;font-size:12px;font-weight:600;color:var(--vf-ink-2)}
@@ -88,11 +88,172 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica N
 .vf-summary-stat{background:var(--vf-surface);border:1.5px solid var(--vf-border);border-radius:14px;padding:18px 14px;text-align:center}
 .vf-summary-stat .val{font-size:32px;font-weight:800;line-height:1;letter-spacing:-.02em;margin-bottom:6px;font-variant-numeric:tabular-nums}
 .vf-summary-stat .lbl{font-size:11px;font-weight:600;color:var(--vf-muted);text-transform:uppercase;letter-spacing:.06em}
+
+/* ---- Welcome banner ---- */
+.vf-welcome-banner{
+  display:none;
+  background:linear-gradient(135deg,#027a48,#065f46);
+  color:#fff;
+  border-radius:var(--vf-radius);
+  padding:22px 20px;
+  margin-bottom:14px;
+  box-shadow:0 4px 16px rgba(2,122,72,.3);
+  animation:vf-slide-down .3s ease-out;
+}
+.vf-welcome-banner.show{display:block}
+.vf-welcome-check{
+  width:40px;height:40px;
+  background:rgba(255,255,255,.2);
+  border-radius:50%;
+  display:grid;place-items:center;
+  margin-bottom:12px;
+}
+.vf-welcome-title{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.85;margin-bottom:4px}
+.vf-welcome-name{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-bottom:6px;line-height:1.2}
+.vf-welcome-sub{font-size:13px;opacity:.8}
+.vf-welcome-badge{
+  display:inline-flex;align-items:center;gap:5px;
+  background:rgba(255,255,255,.2);
+  border-radius:999px;
+  padding:4px 10px;
+  font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  margin-top:10px;
+}
+
+/* ---- Days-worked hero ---- */
+.vf-days-hero{
+  display:none;
+  background:var(--vf-surface);
+  border:1.5px solid var(--vf-border);
+  border-radius:var(--vf-radius);
+  padding:20px;
+  margin-bottom:18px;
+  box-shadow:var(--vf-shadow);
+  text-align:center;
+}
+.vf-days-hero.show{display:block}
+.vf-days-hero-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--vf-muted);margin-bottom:8px}
+.vf-days-hero-num{font-size:56px;font-weight:800;letter-spacing:-.03em;line-height:1;color:var(--vf-success);margin-bottom:6px;font-variant-numeric:tabular-nums}
+.vf-days-hero-month{font-size:13px;color:var(--vf-muted);font-weight:500}
+
+/* ---- Split summary ---- */
+.vf-split-summary{display:none;margin-top:12px;border:1.5px solid var(--vf-border);border-radius:var(--vf-radius);overflow:hidden;background:var(--vf-surface);box-shadow:var(--vf-shadow)}
+.vf-split-summary.show{display:block}
+.vf-split-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;border-bottom:1px solid var(--vf-border)}
+.vf-split-row:last-child{border-bottom:0}
+.vf-split-row.header{background:var(--vf-bg);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--vf-muted)}
+.vf-split-row.header div{padding:7px 12px}
+.vf-split-cell{padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.vf-split-cell:not(:last-child){border-right:1px solid var(--vf-border)}
+.vf-split-cell .s-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--vf-muted)}
+.vf-split-cell .s-row{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--vf-ink);font-weight:500}
+.vf-split-cell .s-row span{color:var(--vf-muted);font-weight:400}
+.vf-split-cell .s-row.worked{color:var(--vf-success)}
+.vf-split-cell .s-row.absent{color:var(--vf-danger)}
+.vf-split-cell .s-row.pending{color:var(--vf-muted)}
+.vf-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block}
+.vf-dot.worked{background:var(--vf-success)}
+.vf-dot.absent{background:var(--vf-danger)}
+.vf-dot.pending{background:var(--vf-muted)}
+
+/* ---- Day-by-day list ---- */
+.vf-daylist{
+  display:none;
+  margin-top:14px;
+  border:1.5px solid var(--vf-border);
+  border-radius:var(--vf-radius);
+  background:var(--vf-surface);
+  box-shadow:var(--vf-shadow);
+  overflow:hidden;
+}
+.vf-daylist.show{display:block}
+.vf-daylist-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:11px 14px;
+  background:var(--vf-bg);
+  border-bottom:1px solid var(--vf-border);
+  font-size:11px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--vf-muted);
+}
+.vf-daylist-tabs{display:flex;gap:4px;background:#e2e8f0;border-radius:8px;padding:3px}
+.vf-daylist-tab{
+  font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+  padding:5px 10px;border-radius:6px;cursor:pointer;color:var(--vf-muted);
+  background:transparent;border:0;min-height:28px;
+}
+.vf-daylist-tab.active{background:#fff;color:var(--vf-ink);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.vf-daylist-section{
+  display:none;
+  padding:8px 12px 12px;
+}
+.vf-daylist-section.active{display:block}
+.vf-daylist-section-title{
+  font-size:11px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--vf-muted);
+  padding:6px 4px;
+  border-bottom:1px dashed var(--vf-border);
+  margin-bottom:6px;
+}
+.vf-daylist-row{
+  display:grid;
+  grid-template-columns:46px 1fr auto;
+  align-items:center;
+  gap:10px;
+  padding:8px 4px;
+  border-bottom:1px solid #f1f5f9;
+  font-size:14px;
+}
+.vf-daylist-row:last-child{border-bottom:0}
+.vf-daylist-row .dow{
+  font-size:10px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--vf-muted);
+}
+.vf-daylist-row .date{
+  font-weight:600;
+  color:var(--vf-ink);
+  font-variant-numeric:tabular-nums;
+}
+.vf-daylist-row .badge{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:600;
+  line-height:1;
+  min-width:80px;
+  justify-content:center;
+}
+.vf-daylist-row .badge.worked{background:var(--vf-success-soft);color:var(--vf-success)}
+.vf-daylist-row .badge.absent{background:var(--vf-danger-soft);color:var(--vf-danger)}
+.vf-daylist-row .badge.pending{background:#e2e8f0;color:#64748b}
+.vf-daylist-empty{
+  text-align:center;
+  padding:18px 12px;
+  font-size:13px;
+  color:var(--vf-muted);
+}
+
 .vf-error-state{background:var(--vf-surface);border:1.5px solid var(--vf-border);border-radius:var(--vf-radius);padding:36px 22px;text-align:center;display:none;box-shadow:var(--vf-shadow)}
 .vf-error-state.show{display:block}
 .vf-error-state .ico{width:56px;height:56px;border-radius:50%;background:var(--vf-danger-soft);color:var(--vf-danger);display:grid;place-items:center;font-size:26px;font-weight:800;margin:0 auto 14px}
 .vf-error-state h2{font-size:18px;font-weight:700;margin-bottom:6px;color:var(--vf-ink)}
 .vf-error-state p{color:var(--vf-muted);font-size:14px;margin-bottom:18px;line-height:1.5}
+.vf-error-state .vf-err-detail{margin-top:14px;padding:10px 14px;background:#f8fafc;border:1px solid var(--vf-border);border-radius:8px;font-family:ui-monospace,monospace;font-size:12px;color:#64748b;text-align:left;display:none;word-break:break-all;max-height:120px;overflow-y:auto}
+.vf-error-state .vf-err-detail.show{display:block}
+.vf-error-state .vf-err-toggle{background:none;border:none;color:var(--vf-muted);font-size:12px;cursor:pointer;text-decoration:underline;padding:0;margin-top:10px}
 #vfAttendance{display:none}
 #vfAttendance.show{display:block}
 .vf-modal{position:fixed;inset:0;background:rgba(11,18,32,.6);display:none;align-items:flex-end;justify-content:center;z-index:200;-webkit-overflow-scrolling:touch}
@@ -110,8 +271,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica N
 .vf-modal-msg.success{background:var(--vf-success-soft);color:var(--vf-success);border:1.5px solid #6ce9a6}
 .vf-modal-actions{display:flex;gap:10px;margin-top:8px}
 .vf-modal-actions .vf-btn{flex:1;min-height:50px}
-@media(max-width:380px){.vf-card{padding:20px 16px}.vf-card h1{font-size:21px}.vf-cal-day{min-height:38px}.vf-cal-day .vf-cal-num{font-size:14px}.vf-summary-stat .val{font-size:26px}.vf-month-label{font-size:16px}}
+@media(max-width:380px){.vf-card{padding:20px 16px}.vf-card h1{font-size:21px}.vf-cal-grid{gap:4px}.vf-cal-day{min-height:38px}.vf-cal-day .vf-cal-num{font-size:14px}.vf-summary-stat .val{font-size:26px}.vf-month-label{font-size:16px}.vf-split-summary{border-radius:12px}.vf-split-cell{padding:8px 8px}.vf-split-row.header div{padding:5px 8px}.vf-daylist{margin-top:12px}.vf-daylist-head{padding:10px 12px}.vf-daylist-section{padding:6px 8px 10px}.vf-daylist-row{padding:6px 8px;gap:8px}.vf-daylist-row .date{font-size:13px}.vf-days-hero{padding:16px}.vf-days-hero-num{font-size:44px}.vf-days-hero-label{font-size:10px}.vf-legend{gap:6px}.vf-legend-item{padding:8px 6px;font-size:11px}.vf-worker-bar{padding:12px;gap:10px}}
 @media(min-width:600px){.vf-cal-day{min-height:54px}.vf-cal-day .vf-cal-num{font-size:16px}}
+@media(max-width:520px){.vf-calendar{padding:12px 8px 14px}.vf-cal-head{gap:2px;margin-bottom:6px}.vf-cal-dow{font-size:10px;padding:4px 0}.vf-split-summary{grid-template-columns:1fr 1fr}.vf-split-row{grid-template-columns:1fr 1fr}.vf-split-cell:not(:last-child){border-right:none;border-bottom:1px solid var(--vf-border)}.vf-split-row:nth-child(even){border-bottom:0}.vf-split-row.header{display:none}.vf-split-summary{margin-top:10px}.vf-daylist-tab{padding:6px 10px;font-size:10px}.vf-days-hero{margin-bottom:14px}.vf-summary{grid-template-columns:1fr 1fr;gap:8px}.vf-summary-stat{padding:14px 10px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 </style>
 </head>
@@ -142,8 +304,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica N
         <input id="vfPin" type="password" placeholder="Default: jts (change after first login)" autocomplete="off" autocapitalize="off" spellcheck="false">
       </div>
       <button class="vf-btn" id="vfLoginBtn" onclick="vfDoLogin()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
-        Sign in
+        <svg class="vf-btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+        <span class="vf-btn-text">Sign in</span>
+        <div class="vf-btn-spinner"></div>
       </button>
       <button class="vf-btn secondary" style="margin-top:10px" onclick="window.location.href='index.html'">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
@@ -164,8 +327,32 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica N
     <h2 id="vfStateErrorTitle">Something went wrong</h2>
     <p id="vfStateErrorMsg">Unable to load your attendance. Please try again.</p>
     <button class="vf-btn secondary" style="max-width:200px;margin:0 auto" onclick="vfRetry()">Try again</button>
+    <button class="vf-err-toggle" id="vfErrToggle" onclick="vfToggleErrDetail()">Show technical detail</button>
+    <div class="vf-err-detail" id="vfErrDetail"></div>
   </div>
   <div id="vfAttendance">
+
+    <!-- Welcome banner — shown immediately after successful login -->
+    <div class="vf-welcome-banner" id="vfWelcomeBanner">
+      <div class="vf-welcome-check">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div class="vf-welcome-title">Verification successful</div>
+      <div class="vf-welcome-name" id="vfWelcomeName">—</div>
+      <div class="vf-welcome-sub">Here is your attendance summary for this month.</div>
+      <div class="vf-welcome-badge" id="vfWelcomeBadge">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        Verified
+      </div>
+    </div>
+
+    <!-- Days-worked hero card — prominent, above the calendar -->
+    <div class="vf-days-hero" id="vfDaysHero">
+      <div class="vf-days-hero-label">Days worked this month</div>
+      <div class="vf-days-hero-num" id="vfDaysHeroNum">—</div>
+      <div class="vf-days-hero-month" id="vfDaysHeroMonth">—</div>
+    </div>
+
     <div class="vf-worker-bar" id="vfWorkerBar">
       <div class="vf-worker-avatar" id="vfAvatar">?</div>
       <div class="vf-worker-info">
@@ -198,6 +385,21 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica N
       </div>
       <div class="vf-cal-grid" id="vfCalGrid"></div>
     </div>
+
+    <!-- Day-by-day attendance list (hidden) -->
+    <div class="vf-daylist" id="vfDayList" style="display:none">
+      <div class="vf-daylist-head">
+        <span>Attendance breakdown</span>
+        <div class="vf-daylist-tabs">
+          <button class="vf-daylist-tab active" id="vfTabAll" onclick="vfSwitchDayTab('all')">All</button>
+          <button class="vf-daylist-tab" id="vfTabFirst" onclick="vfSwitchDayTab('first')">1 &ndash; 15</button>
+          <button class="vf-daylist-tab" id="vfTabSecond" onclick="vfSwitchDayTab('second')">16 &ndash; end</button>
+        </div>
+      </div>
+      <div class="vf-daylist-section active" id="vfDayListAll"></div>
+      <div class="vf-daylist-section" id="vfDayListFirst"></div>
+      <div class="vf-daylist-section" id="vfDayListSecond"></div>
+    </div>
     <div class="vf-legend" id="vfLegend">
       <div class="vf-legend-item">
         <div class="vf-legend-dot vf-worked">
@@ -218,14 +420,30 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica N
         Pending
       </div>
     </div>
-    <div class="vf-summary" id="vfSummary">
-      <div class="vf-summary-stat">
-        <div class="val" id="vfSummaryWorked" style="color:var(--vf-success)">-</div>
-        <div class="lbl">Worked</div>
+    <div class="vf-split-summary" id="vfSplitSummary">
+      <div class="vf-split-row header">
+        <div>Period</div>
+        <div>Worked</div>
+        <div>Absent</div>
+        <div>Pending</div>
       </div>
-      <div class="vf-summary-stat">
-        <div class="val" id="vfSummaryAbsent" style="color:var(--vf-danger)">-</div>
-        <div class="lbl">Absent</div>
+      <div class="vf-split-row" id="vfSplitFirst">
+        <div class="vf-split-cell"><div class="s-label" id="vfSplitFirstLabel">1 &ndash; 15</div></div>
+        <div class="vf-split-cell"><div class="s-row worked"><span class="vf-dot worked"></span><span id="vfSF1Worked">-</span></div></div>
+        <div class="vf-split-cell"><div class="s-row absent"><span class="vf-dot absent"></span><span id="vfSF1Absent">-</span></div></div>
+        <div class="vf-split-cell"><div class="s-row pending"><span class="vf-dot pending"></span><span id="vfSF1Pending">-</span></div></div>
+      </div>
+      <div class="vf-split-row" id="vfSplitSecond">
+        <div class="vf-split-cell"><div class="s-label" id="vfSplitSecondLabel">16 &ndash; end</div></div>
+        <div class="vf-split-cell"><div class="s-row worked"><span class="vf-dot worked"></span><span id="vfSF2Worked">-</span></div></div>
+        <div class="vf-split-cell"><div class="s-row absent"><span class="vf-dot absent"></span><span id="vfSF2Absent">-</span></div></div>
+        <div class="vf-split-cell"><div class="s-row pending"><span class="vf-dot pending"></span><span id="vfSF2Pending">-</span></div></div>
+      </div>
+      <div class="vf-split-row" id="vfSplitTotal">
+        <div class="vf-split-cell"><div class="s-label">Full month</div></div>
+        <div class="vf-split-cell"><div class="s-row worked"><span class="vf-dot worked"></span><span id="vfSTWorked">-</span></div></div>
+        <div class="vf-split-cell"><div class="s-row absent"><span class="vf-dot absent"></span><span id="vfSTAbsent">-</span></div></div>
+        <div class="vf-split-cell"><div class="s-row pending"><span class="vf-dot pending"></span><span id="vfSTPending">-</span></div></div>
       </div>
     </div>
     <button class="vf-btn ghost" style="margin-top:8px" onclick="vfSignOut()">

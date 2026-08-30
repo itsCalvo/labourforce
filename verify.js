@@ -84,7 +84,8 @@ function vfDoLogin(){
   }
 
   btn.disabled = true;
-  btn.textContent = 'Verifying...';
+  btn.classList.add('loading');
+  btn.setAttribute('aria-busy', 'true');
   vfCallVerify(employeeNo, pin)
     .then(function(result){
       if (!result.ok) {
@@ -111,12 +112,17 @@ function vfDoLogin(){
       }
       vfShowAttendance();
     })
-    .catch(function(){
-      if (errEl) { errEl.textContent = 'Unable to verify. Please try again.'; errEl.classList.add('show'); }
+    .catch(function(err){
+      if (err && err.name === 'AbortError') {
+        if (errEl) { errEl.textContent = 'Connection timed out. Check your internet.'; errEl.classList.add('show'); }
+      } else {
+        if (errEl) { errEl.textContent = 'Unable to verify. Check your connection.'; errEl.classList.add('show'); }
+      }
     })
     .then(function(){
       btn.disabled = false;
-      btn.textContent = 'Verify';
+      btn.classList.remove('loading');
+      btn.removeAttribute('aria-busy');
     });
 }
 
@@ -124,8 +130,11 @@ function vfDoLogin(){
 // Authorization header is the only credential sent; the function
 // itself uses the service_role key to look up the PIN hash server-side.
 function vfCallVerify(employeeNo, pin){
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
   return fetch(VF_VERIFY_URL, {
     method:  'POST',
+    signal: controller.signal,
     headers: {
       'Content-Type': 'application/json',
       'apikey':       window.LABOUR_FORCE_SUPABASE_ANON_KEY || '',
@@ -134,6 +143,7 @@ function vfCallVerify(employeeNo, pin){
     body: JSON.stringify({ employee_no: employeeNo, pin: pin }),
   })
   .then(function(r){
+    clearTimeout(timeoutId);
     if (!r.ok) {
       // Map known HTTP statuses to the same generic worker-facing message
       if (r.status === 401 || r.status === 403) return { ok: false, error: 'invalid' };
@@ -167,6 +177,12 @@ function vfShowAttendance(){
     var initials = (vfState.full_name || '?').split(' ').map(function(w){ return w[0]||''; }).slice(0,2).join('').toUpperCase();
     avEl.textContent = initials;
   }
+
+  // Show welcome banner with worker name (it was previously hidden)
+  var wbEl = $('vfWelcomeBanner');
+  var wnEl = $('vfWelcomeName');
+  if (wbEl) wbEl.classList.add('show');
+  if (wnEl) wnEl.textContent = vfState.full_name || 'Worker';
   var hdrBtn = $('vfSignOut');
   if (hdrBtn) hdrBtn.style.display = '';
 
@@ -302,7 +318,7 @@ function vfRenderCalendar(year, month, byDate){
 
   for (var i = 0; i < lead; i++) {
     var blank = document.createElement('div');
-    blank.className = 'vf-cal-cell vf-cal-empty';
+    blank.className = 'vf-cal-empty';
     grid.appendChild(blank);
   }
 
@@ -331,7 +347,7 @@ function vfRenderCalendar(year, month, byDate){
     if (cat === 'absent' && !status) cat = 'pending';
 
     var cell = document.createElement('div');
-    cell.className = 'vf-cal-cell ' + ({
+    cell.className = 'vf-cal-day ' + ({
       'worked': 'vf-worked',
       'absent': 'vf-absent',
       'pending':'vf-pending',
@@ -345,16 +361,14 @@ function vfRenderCalendar(year, month, byDate){
       'pending':'\u00B7',
     }[cat]);
 
-    var lbl = document.createElement('div');
-    lbl.className = 'vf-cal-day';
-    lbl.textContent = d;
+    var num = document.createElement('div');
+    num.className = 'vf-cal-num';
+    num.textContent = d;
 
+    cell.appendChild(num);
     cell.appendChild(mark);
-    cell.appendChild(lbl);
-    if (isToday) {
-      cell.style.outline = '2px solid #2563eb';
-      cell.style.outlineOffset = '-2px';
-    }
+    if (isToday) cell.classList.add('vf-today');
+    if (isFuture) cell.classList.add('vf-future');
     grid.appendChild(cell);
   }
 }
