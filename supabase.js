@@ -178,13 +178,16 @@ function bindAuthGate(){
     const password=document.getElementById('gatePassword').value;
     const out=document.getElementById('gateError'); if(out)out.textContent='';
     if(!email||!password){if(out)out.textContent='Email and password are required.';return;}
-    btn.disabled=true; btn.textContent='Signing in';
+    btn.disabled=true; btn.classList.add('loading'); btn.setAttribute('aria-busy','true');
+    /* 12s timeout so users aren't left waiting on a dead connection */
+    const timeoutId=setTimeout(()=>{ if(out)out.textContent='Connection timed out. Check your internet.'; btn.disabled=false; btn.classList.remove('loading'); btn.removeAttribute('aria-busy'); },12000);
     try{
       const {error}=await labourForceSupabase.auth.signInWithPassword({email,password});
+      clearTimeout(timeoutId);
       if(error&&out)out.textContent=error.message;
       /* On success the auth-state listener -> handleSession unlocks the app. */
-    }catch(err){ if(out)out.textContent=err.message||'Sign in failed.'; }
-    finally{ btn.disabled=false; btn.textContent='Sign in'; }
+    }catch(err){ clearTimeout(timeoutId); if(out)out.textContent=(err&&err.message)||'Sign in failed.'; }
+    finally{ btn.disabled=false; btn.classList.remove('loading'); btn.removeAttribute('aria-busy'); }
   };
   btn.onclick=doLogin;
   const pwd=document.getElementById('gatePassword');

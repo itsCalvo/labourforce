@@ -116,6 +116,11 @@ input[type="checkbox"]{width:15px;height:15px;cursor:pointer;accent-color:var(--
 .sup-auth-form input:focus{border-color:var(--accent)}
 .sup-auth-form input::placeholder{color:var(--muted)}
 .sup-login-err{font-size:12px;color:var(--danger);min-height:16px;text-align:left}
+.sup-btn-text{transition:opacity .2s}
+.sup-btn-spinner{display:none;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:sup-spin .7s linear infinite;vertical-align:middle;margin-left:6px}
+.btn-primary.loading .sup-btn-text{opacity:0}
+.btn-primary.loading .sup-btn-spinner{display:inline-block}
+@keyframes sup-spin{to{transform:rotate(360deg)}}
 .sup-auth-back{display:block;margin-top:16px;font-size:11px;color:var(--muted);text-decoration:none}
 .sup-auth-back:hover{color:var(--accent)}
 
@@ -139,7 +144,7 @@ input[type="checkbox"]{width:15px;height:15px;cursor:pointer;accent-color:var(--
       <input id="supEmail" type="email" placeholder="Email address" autocomplete="username">
       <input id="supPassword" type="password" placeholder="Password" autocomplete="current-password">
       <div class="sup-login-err" id="supLoginErr"></div>
-      <button class="btn btn-primary" id="supDoLogin">Sign in</button>
+      <button class="btn btn-primary" id="supDoLogin"><span class="sup-btn-text">Sign in</span><span class="sup-btn-spinner"></span></button>
     </div>
     <a class="sup-auth-back" href="index.html">Back to Labour Force</a>
   </div>

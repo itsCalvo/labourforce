@@ -68,3 +68,4 @@ tbody tr{transition:background .12s}
 /* Loading skeleton for tables */
 .lf-skel{background:linear-gradient(90deg,#f1f5f9 0%,#e2e8f0 50%,#f1f5f9 100%);background-size:200% 100%;animation:lf-skel 1.2s ease-in-out infinite;border-radius:6px}
 @keyframes lf-skel{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.lf-btn-text{transition:opacity .2s}.lf-btn-spinner{display:none;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:lf-spin .7s linear infinite;vertical-align:middle;margin-left:6px}button.primary.loading .lf-btn-text{opacity:0}button.primary.loading .lf-btn-spinner{display:inline-block}@keyframes lf-spin{to{transform:rotate(360deg)}}

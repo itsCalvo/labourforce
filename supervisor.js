@@ -187,12 +187,17 @@
       if (!email || !password) { supToast('Email and password required', 'error'); return; }
       var errEl = document.getElementById('supLoginErr');
       if (errEl) errEl.textContent = '';
+      doLogin.disabled = true; doLogin.classList.add('loading'); doLogin.setAttribute('aria-busy','true');
+      /* 12s timeout so users aren't left waiting on a dead connection */
+      var timeoutId = setTimeout(function(){ if(errEl) errEl.textContent = 'Connection timed out. Check your internet.'; doLogin.disabled = false; doLogin.classList.remove('loading'); doLogin.removeAttribute('aria-busy'); }, 12000);
       client.auth.signInWithPassword({ email: email, password: password })
         .then(function (r) {
+          clearTimeout(timeoutId);
           if (r.error) { if (errEl) errEl.textContent = r.error.message; return; }
           supSession = r.data.session;
           supLoadProfile();
-        })['catch'](function (e) { if (errEl) errEl.textContent = String(e && e.message || e); });
+        })['catch'](function (e) { clearTimeout(timeoutId); if (errEl) errEl.textContent = String(e && e.message || e); })
+        ['finally'](function(){ doLogin.disabled = false; doLogin.classList.remove('loading'); doLogin.removeAttribute('aria-busy'); });
     });
 
     var signOut = document.getElementById('supSignOut');
