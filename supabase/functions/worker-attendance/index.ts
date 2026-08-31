@@ -58,13 +58,14 @@ Deno.serve(async (req) => {
       { status: 400, headers: { ...corsHeaders, 'content-type': 'application/json' } })
   }
 
-  const workerId     = Number(body.worker_id)
+  // worker_id is a UUID string from the workers table, NOT a numeric ID.
+  const workerId     = String(body.worker_id || '').trim()
   const sessionToken = String(body.session_token || '').trim()
   const rangeStart   = String(body.range_start || '').trim()
   const rangeEnd     = String(body.range_end   || '').trim()
 
   // Basic validation
-  if (!workerId || isNaN(workerId) || !rangeStart || !rangeEnd || !sessionToken) {
+  if (!workerId || !rangeStart || !rangeEnd || !sessionToken) {
     return new Response(JSON.stringify({ error: 'invalid_request' }),
       { status: 400, headers: { ...corsHeaders, 'content-type': 'application/json' } })
   }

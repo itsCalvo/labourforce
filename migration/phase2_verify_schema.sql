@@ -12,7 +12,7 @@
 -- Each active worker has exactly one row. Workers who have never set a PIN
 -- have the DEFAULT hash which accepts 'jts' as the initial PIN.
 CREATE TABLE IF NOT EXISTS public.worker_pins (
-  worker_id    bigint PRIMARY KEY REFERENCES public.workers(id) ON DELETE CASCADE,
+  worker_id    uuid PRIMARY KEY REFERENCES public.workers(id) ON DELETE CASCADE,
   pin_hash     text NOT NULL,
   -- The hash is a bcrypt-style digest: $2b$10$<salt><hash>
   -- Default accepts 'jts'  →  $2b$10$00000000000000000000uPzp7wM2r6hY0X3b9aLqJ4YH5Z6W7M8N

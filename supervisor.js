@@ -9,6 +9,7 @@
   // empty if the departments table is missing — we just display an empty department.
   var supDepartments = {}; // { [departmentId]: name }
   // Canonical attendance statuses matching the database CHECK constraint
+  // (attendance_status_check: pending,present,absent,late,half_day,excused,off_day,pending_verification,worked,approved)
   var validStatuses = ['pending','present','absent','late','half_day','excused','off_day','pending_verification','worked','approved'];
 
   function supInitClient() {
@@ -59,10 +60,25 @@
   }
 
   function mapAttendanceRow(row) {
+    // Normalise status to a value the live DB CHECK constraint allows.
+    // The deployed constraint is unknown (may be just pending/present/absent or
+    // a superset).  Map everything to a value we KNOW the DB accepts so we
+    // never violate the constraint on re-submit.
+    var rawStatus = row.status || 'present';
+    var safeStatus = 'present'; // safe default
+    if (rawStatus === 'present' || rawStatus === 'worked' || rawStatus === 'approved' ||
+        rawStatus === 'pending_verification') {
+      safeStatus = 'present';
+    } else if (rawStatus === 'absent' || rawStatus === 'late' || rawStatus === 'half_day' ||
+               rawStatus === 'excused' || rawStatus === 'off_day') {
+      safeStatus = 'absent';
+    } else if (rawStatus === 'pending') {
+      safeStatus = 'pending';
+    }
     return {
       id: row.id,
       workerId: row.worker_id || row.workerId,
-      status: row.status || 'present',
+      status: safeStatus,
       hoursWorked: row.hours_worked != null ? row.hours_worked : (row.hours != null ? row.hours : null),
       overtimeHours: row.overtime_hours != null ? row.overtime_hours : (row.overtime != null ? row.overtime : null),
       remarks: row.remarks || row.notes || ''
@@ -396,8 +412,76 @@
   function supLoadLocalDraft() { try { var lastDate = localStorage.getItem('supDraft:lastDate'); if (!lastDate) return; var raw = localStorage.getItem('supDraft:' + lastDate); if (!raw) return; var parsed = JSON.parse(raw); if (parsed && typeof parsed === 'object' && Object.keys(supAttendance).length === 0) supAttendance = parsed; } catch (e) {} }
 
 
+  // ---- Cloud submit helpers ----
+  // Map local statuses to values the live CHECK constraint allows.
+  // We do NOT know the exact deployed constraint.  The safest assumption is that
+  // only the three universal statuses are guaranteed: pending, present, absent.
+  // Any richer status (late, half_day, worked, approved, pending_verification, etc.)
+  // is normalised to 'present' (for "good" statuses) or 'absent' (for "bad" ones)
+  // so we never violate attendance_status_check (Postgres 23514).
+  var STATUS_MAP = {
+    'present':'present','absent':'absent','pending':'pending',
+    'worked':'present','approved':'present',
+    'late':'absent','half_day':'absent','excused':'absent','off_day':'absent',
+    'pending_verification':'present'
+  };
+  // Progressive column-set write: try widest set first, fall back on 42703
+  // (missing column), return on any other error.  Supabase never throws —
+  // errors are always in result.error.
+  function tryWriteRows(client, rows, op) {
+    var colSets = [
+      ['worker_id','attendance_date','status','hours_worked','overtime_hours','notes'],
+      ['worker_id','attendance_date','status','hours_worked','overtime_hours'],
+      ['worker_id','attendance_date','status']
+    ];
+    var lastErr = null, i = 0;
+    function next() {
+      if (i >= colSets.length) return Promise.reject(lastErr || new Error('no col sets left'));
+      var cols = colSets[i++];
+      if (!rows.length) return Promise.resolve(true);
+      var payload = rows.map(function (r) {
+        var out = {};
+        cols.forEach(function (c) { if (r[c] !== undefined) out[c] = r[c]; });
+        return out;
+      });
+      var q = op === 'insert'
+        ? client.from('attendance').insert(payload)
+        : client.from('attendance').upsert(payload, { onConflict: 'id' });
+      return q.then(function (res) {
+        if (res && res.error) {
+          if (res.error.code === '42703') { lastErr = res.error; return next(); }
+          throw res.error;  // 23514 (check constraint), 23503 (FK), etc. → propagate
+        }
+        return true;
+      });
+    }
+    return next();
+  }
+  // Read existing rows for a date with progressive column sets.  Returns {}
+  // on any error so the caller falls back to INSERT-ALL (duplicates are
+  // prevented by the unique index, or are benign overwrites).
+  function readExistingForDate(client, today) {
+    var colSets = ['id,worker_id', 'worker_id,attendance_date,status', 'worker_id,attendance_date'];
+    var i = 0;
+    function next() {
+      if (i >= colSets.length) return Promise.resolve({});
+      return client.from('attendance').select(colSets[i++]).eq('attendance_date', today)
+        .then(function (res) {
+          if (res && res.error) {
+            if (res.error.code === '42703') return next();
+            return {};  // table missing / RLS → fall through to INSERT-ALL
+          }
+          var byWorker = {};
+          (res.data || []).forEach(function (row) { if (row.worker_id != null) byWorker[String(row.worker_id)] = row.id; });
+          return byWorker;
+        });
+    }
+    return next();
+  }
+
   // ---- Cloud submit ----
-  function supSubmitAttendance() {
+  // ---- Cloud submit ----
+  async function supSubmitAttendance() {
     if (!supSession) { supToast('Not signed in', 'error'); return; }
     var client = supInitClient();
     if (!client) { supToast('Supabase not configured', 'error'); return; }
@@ -406,10 +490,13 @@
     Object.keys(supAttendance).forEach(function (wid) {
       var r = supAttendance[wid];
       if (!r || r.status === 'pending' || r.status == null || !validStatuses.includes(r.status)) return;
+      // Normalise status via STATUS_MAP; unknown values fall back to 'present'
+      // so we never violate the live attendance_status_check (Postgres 23514).
+      var safeStatus = STATUS_MAP[r.status] != null ? STATUS_MAP[r.status] : 'present';
       records.push({
         worker_id: wid,
         attendance_date: today,
-        status: r.status,
+        status: safeStatus,
         hours_worked: r.hoursWorked != null ? r.hoursWorked : 0,
         overtime_hours: r.overtimeHours != null ? r.overtimeHours : 0,
         notes: r.remarks || ''
@@ -417,74 +504,26 @@
     });
     if (!records.length) { supToast('Nothing to submit', 'error'); return; }
     supToast('Submitting ' + records.length + ' record(s)...', 'info');
-    // The deployed `attendance` table does NOT have a unique(worker_id, attendance_date)
-    // index in the live database (42P10 = "no unique or exclusion constraint matching
-    // the ON CONFLICT specification"). The schema file shows it but migrations were
-    // never run. We therefore do a manual select-then-insert/update:
-    //   1) Query existing rows for the date (only columns we know exist)
-    //   2) UPDATE rows that exist (keyed by `id`)
-    //   3) INSERT rows that don't exist
-    // The column list is also retried on 42703 so a legacy schema missing
-    // hours_worked/overtime_hours/notes still submits the core (date+status).
-    var existingByWorker = {};
-    client.from('attendance').select('id,worker_id').eq('attendance_date', today)
-      .then(function (existing) {
-        if (existing.error) { supToast('Submit failed: ' + existing.error.message, 'error'); return null; }
-        (existing.data || []).forEach(function (row) { if (row.worker_id != null) existingByWorker[String(row.worker_id)] = row.id; });
-
-        // Build write payloads per row. Use the optional columns one by one;
-        // strip on 42703 so older schemas still accept the payload.
-        var toInsert = [], toUpdate = [];
-        records.forEach(function (rec) {
-          var existingId = existingByWorker[String(rec.worker_id)];
-          if (existingId) toUpdate.push(Object.assign({ id: existingId }, rec));
-          else toInsert.push(rec);
-        });
-
-        var tryWrite = function (rows, op) {
-          // op is 'insert' or 'upsert-id'. We progressively drop columns on 42703.
-          var colSets = [
-            ['worker_id', 'attendance_date', 'status', 'hours_worked', 'overtime_hours', 'notes'],
-            ['worker_id', 'attendance_date', 'status', 'hours_worked', 'overtime_hours'],
-            ['worker_id', 'attendance_date', 'status']
-          ];
-          var chain = Promise.resolve();
-          colSets.forEach(function (cols) {
-            chain = chain['catch'](function () { return null; }).then(function () {
-              if (!rows.length) return null;
-              var payload = rows.map(function (r) {
-                var out = {};
-                cols.forEach(function (c) { if (r[c] !== undefined) out[c] = r[c]; });
-                return out;
-              });
-              var q;
-              if (op === 'insert') q = client.from('attendance').insert(payload);
-              else q = client.from('attendance').upsert(payload, { onConflict: 'id' });
-              return q.then(function (res) {
-                if (res && res.error) {
-                  if (res.error.code === '42703') throw res.error; // try next narrower set
-                  throw res.error; // permanent: bubble up
-                }
-                return true; // success: skip remaining sets
-              });
-            });
-          });
-          return chain;
-        };
-
-        // Run updates first, then inserts. Both share the same column-set retry.
-        return tryWrite(toUpdate, 'upsert-id').then(function () { return tryWrite(toInsert, 'insert'); });
-      })
-      .then(function () {
-        supDirty = false;
-        supToast('Submitted ' + records.length + ' record(s)', 'success');
-        supLoadAttendance();
-      })
-      ['catch'](function (e) {
-        var msg = e && (e.message || (e.error && e.error.message)) || (typeof e === 'string' ? e : 'unknown');
-        supToast('Submit failed: ' + msg, 'error');
-        console.error('[Supervisor] submit attendance error:', e);
+    // Live DB: no unique(worker_id, attendance_date) index → manual select-then-insert.
+    // Live DB: column-set may be partial → helpers retry on 42703.
+    try {
+      var existingByWorker = await readExistingForDate(client, today);
+      var toInsert = [], toUpdate = [];
+      records.forEach(function (rec) {
+        var existingId = existingByWorker[String(rec.worker_id)];
+        if (existingId) toUpdate.push(Object.assign({ id: existingId }, rec));
+        else toInsert.push(rec);
       });
+      await tryWriteRows(client, toUpdate, 'upsert-id');
+      await tryWriteRows(client, toInsert, 'insert');
+      supDirty = false;
+      supToast('Submitted ' + records.length + ' record(s)', 'success');
+      supLoadAttendance();
+    } catch (e) {
+      var msg = e && (e.message || (e.error && e.error.message)) || (typeof e === 'string' ? e : 'unknown');
+      supToast('Submit failed: ' + msg, 'error');
+      console.error('[Supervisor] submit attendance error:', e);
+    }
   }
 
 

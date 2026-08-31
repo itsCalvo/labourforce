@@ -106,7 +106,7 @@ const LF_PAGE_RENDER={
  clients:()=>renderClients(),
  departments:()=>renderDepartments(),
  payroll:()=>renderPayroll(),
- users:()=>{if(typeof renderUsers==='function')renderUsers();},
+ users:()=>{if(typeof initUsers==='function')initUsers();},
  reports:()=>renderReports(),
  audit:()=>renderAudit(),
  'worker-portal':()=>renderWorkerPortal(),
@@ -114,7 +114,7 @@ const LF_PAGE_RENDER={
 };
 /* Heavy containers cleared when leaving a page so hidden pages cost nothing. */
 const LF_PAGE_CLEAR={
- dashboard:['dashboardDesignationGroups','dashboardAttendance','dashboardRequestsTable','dashboardAttendancePager'],
+ dashboard:['dashboardAttendance','dashboardRequestsTable','dashQuickStats','dashboardAttendancePager'],
  requests:['requestsSummary','requestsTable','requestsPager'],
  attendance:['attendanceTable','attendancePager'],
  approval:['approvalTable','approvalPager'],
@@ -131,7 +131,7 @@ const LF_PAGE_CLEAR={
  availability:['availabilityCards','availabilityTable','availabilityPager'],
  exceptions:['exceptionCards','exceptionsTable'],
  audit:['auditTable','auditPager'],
- users:['userSummaryCards','usersTable','usersPager']
+ users:['userSummaryCards','usersTable','usersPager','rolesOverview']
 };
 let lfCurrentPage=null;
 function showPage(id,button){
@@ -161,45 +161,103 @@ window.showPage=showPage;
 function populateFilters(){const ids=["departmentFilter","workerDepartmentFilter","approvalDepartment","requestDepartment","deploymentDepartment"];ids.forEach(id=>{const el=document.getElementById(id);if(!el)return;const current=el.value;el.innerHTML=(id.includes("Filter")||id==="approvalDepartment")?'<option value="all">All Departments</option>':'';if(id==="requestDepartment"||id==="deploymentDepartment")el.innerHTML="";departments.forEach(d=>el.innerHTML+=`<option value="${esc(d.name)}">${esc(d.name)}</option>`);if([...el.options].some(o=>o.value===current))el.value=current});const wd=document.getElementById("workerDepartment");if(wd){const current=wd.value;wd.innerHTML="";departments.forEach(d=>wd.innerHTML+=`<option value="${esc(d.name)}">${esc(d.name)}</option>`);if([...wd.options].some(o=>o.value===current))wd.value=current}const parent=document.getElementById("departmentParent");if(parent){parent.innerHTML='<option value="">None</option>';departments.forEach(d=>parent.innerHTML+=`<option value="${esc(d.name)}">${esc(d.name)}</option>`)}populateClientSelects()}
 function populateClientSelects(){const ids=["requestClient","deploymentClient"];ids.forEach(id=>{const el=document.getElementById(id);if(!el)return;const current=el.value;el.innerHTML="<option value=''>Select client</option>";clients.filter(c=>c.active).forEach(c=>el.innerHTML+=`<option value="${c.id}">${esc(c.name)}</option>`);if([...el.options].some(o=>o.value===current))el.value=current});const req=document.getElementById("deploymentRequest");if(req){const current=req.value;req.innerHTML='<option value="">Direct deployment — no request</option>';labourRequests.filter(r=>!["Cancelled","Completed"].includes(r.status)).forEach(r=>{const c=clientById(r.clientId);req.innerHTML+=`<option value="${r.id}">${esc(r.requestNo)} — ${esc(c?.name||"Unknown client")}</option>`});if([...req.options].some(o=>o.value===current))req.value=current}}
 
-/* ---------- dashboard (memoized) ---------- */
-let lfDashCache={key:'',present:[],activeCount:0,pendingCount:0,groupsHtml:'',designations:[],departmentsArr:[]};
+/* ---------- dashboard (deployment-focused, memoized) ---------- */
+let lfDashCache={key:'',deployed:[],designations:[],departmentsArr:[],clients:[]};
+window.lfDashShift=window.lfDashShift||'all';
+window.dashSetShift=function(shift){
+  window.lfDashShift=shift;
+  document.querySelectorAll('.dash-shift-btn').forEach(function(btn){
+    btn.classList.toggle('dash-shift-btn--active',btn.dataset.shift===shift);
+  });
+  renderFuturisticDashboard();
+};
 function renderFuturisticDashboard(){
- const dateEl=document.getElementById('dashboardDate');const date=dateEl?.value||today();
- const search=(document.getElementById('dashboardWorkerSearch')?.value||'').toLowerCase().trim();
- const designation=document.getElementById('dashboardDesignationFilter')?.value||'all';
- const department=document.getElementById('dashboardDepartmentFilter')?.value||'all';
- const cacheKey=date+'|'+lfDataVersion;
- if(lfDashCache.key!==cacheKey){
-   const active=workers.filter(w=>w.active);
-   const present=active.map(w=>({w,r:peekAttendance(date,w.id)})).filter(x=>x.r.status==='present'||x.r.status==='worked');
-   const pendingCount=active.reduce((n,w)=>n+(peekAttendance(date,w.id).status==='pending'?1:0),0);
-   const groupMap={};present.forEach(({w})=>{const k=w.designation||'Unassigned';groupMap[k]=(groupMap[k]||0)+1;});
-   const groupsHtml=Object.entries(groupMap).sort((a,b)=>b[1]-a[1]).map(([name,count])=>`<button class="designation-pulse" onclick="document.getElementById('dashboardDesignationFilter').value=${JSON.stringify(name).replace(/"/g,'"')};renderFuturisticDashboard()"><span>${esc(name)}</span><strong>${count}</strong><small>present</small></button>`).join('');
-   lfDashCache={key:cacheKey,present,activeCount:active.length,pendingCount,groupsHtml,
-     designations:[...new Set(active.map(w=>w.designation).filter(Boolean))].sort(),
-     departmentsArr:[...new Set(active.map(w=>w.department).filter(Boolean))].sort()};
- }
- document.getElementById('dashboardWorkers').textContent=lfDashCache.activeCount;
- document.getElementById('dashboardRequests').textContent=labourRequests.filter(r=>r.status==='Pending').length;
- document.getElementById('dashboardWorked').textContent=lfDashCache.present.length;
- document.getElementById('dashboardMissing').textContent=lfDashCache.pendingCount;
- /* Designation chips + filter options only rebuild when data changes, not per keystroke. */
- const groups=document.getElementById('dashboardDesignationGroups');
- if(groups)groups.innerHTML=lfDashCache.groupsHtml||'<div class="empty">No present workers recorded for this date.</div>';
- const fill=(id,values,label)=>{const select=document.getElementById(id);if(!select)return;const current=select.value;select.innerHTML=`<option value="all">All ${label}</option>`+values.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');if(values.includes(current))select.value=current};
- fill('dashboardDesignationFilter',lfDashCache.designations,'designations');
- fill('dashboardDepartmentFilter',lfDashCache.departmentsArr,'departments');
- const filtered=lfDashCache.present.filter(x=>(designation==='all'||x.w.designation===designation)&&(department==='all'||x.w.department===department)&&(!search||[x.w.name,x.w.idNumber,x.w.employeeNo,x.w.designation,x.w.department].some(v=>String(v||'').toLowerCase().includes(search))));
- const pageRows=lfPaginate('dashAtt',filtered,25);
- const table=document.getElementById('dashboardAttendance');
- if(table)table.innerHTML=pageRows.length?pageRows.map(({w,r})=>`<tr><td><strong>${esc(w.name)}</strong></td><td>${esc(w.idNumber||w.employeeNo||'—')}</td><td>${esc(w.designation||'Unassigned')}</td><td>${esc(w.department||'—')}</td><td>${Number(r.hours||0)}</td><td>${Number(r.overtime||0)}</td><td><span class="status status-worked">Present</span></td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">No present workers match the current view.</div></td></tr>`;
- lfRenderPager('dashboardAttendancePager','dashAtt','present workers');
- const rt=document.getElementById('dashboardRequestsTable');
- if(rt&&!rt.childElementCount){rt.innerHTML='';labourRequests.slice(-5).reverse().forEach(r=>{const c=clientById(r.clientId);rt.innerHTML+=`<tr><td><strong>${esc(r.requestNo)}</strong></td><td>${esc(c?.name||'—')}</td><td>${esc(r.department)}</td><td>${r.workersRequired}</td><td>${esc(r.startDate)}</td><td><span class="status ${statusClass(r.status)}">${esc(r.status)}</span></td></tr>`});}
-}
-function renderDashboard(){renderFuturisticDashboard();}
+  var dateEl=document.getElementById('dashboardDate');var date=dateEl&&dateEl.value||today();
+  var search=(document.getElementById('dashboardWorkerSearch')&&document.getElementById('dashboardWorkerSearch').value||'').toLowerCase().replace(/^\s+|\s+$/g,'');
+  var designation=(document.getElementById('dashboardDesignationFilter')&&document.getElementById('dashboardDesignationFilter').value)||'all';
+  var department=(document.getElementById('dashboardDepartmentFilter')&&document.getElementById('dashboardDepartmentFilter').value)||'all';
+  var client=(document.getElementById('dashboardClientFilter')&&document.getElementById('dashboardClientFilter').value)||'all';
+  var shift=window.lfDashShift||'all';
+  var cacheKey=date+'|'+lfDataVersion;
+  if(lfDashCache.key!==cacheKey){
+    var deployed=workers.filter(function(w){return w.active&&activeDeployment(w.id);}).map(function(w){
+      var r=peekAttendance(date,w.id);
+      var dep=activeDeployment(w.id);
+      var cli=clientById(dep&&dep.clientId);
+      return {w:w,r:r,dep:dep,cli:cli,shift:dep&&dep.shift||'Day'};
+    });
+    var designations=[];var seen={};deployed.forEach(function(x){var v=x.w.designation;if(v&&!seen[v]){seen[v]=true;designations.push(v);}});designations.sort();
+    var departmentsArr=[];var seen2={};deployed.forEach(function(x){var v=x.w.department;if(v&&!seen2[v]){seen2[v]=true;departmentsArr.push(v);}});departmentsArr.sort();
+    var clients=[];var seen3={};deployed.forEach(function(x){var v=x.cli&&x.cli.name;if(v&&!seen3[v]){seen3[v]=true;clients.push(v);}});clients.sort();
+    lfDashCache={key:cacheKey,deployed:deployed,designations:designations,departmentsArr:departmentsArr,clients:clients};
+  }
+  var totalDeployed=lfDashCache.deployed.length;
+  var present=lfDashCache.deployed.filter(function(x){return x.r.status==='present'||x.r.status==='worked';});
+  var pending=lfDashCache.deployed.filter(function(x){return x.r.status==='pending';});
+  var dayCount=lfDashCache.deployed.filter(function(x){return x.shift==='Day';}).length;
+  var nightCount=lfDashCache.deployed.filter(function(x){return x.shift==='Night'||x.shift==='night';}).length;
+  var el;
+  el=document.getElementById('dashboardOnBoard');if(el)el.textContent=totalDeployed;
+  el=document.getElementById('dashboardPresent');if(el)el.textContent=present.length;
+  el=document.getElementById('dashboardAbsent');if(el)el.textContent=pending.length;
+  el=document.getElementById('dashboardPendingRequests');if(el)el.textContent=labourRequests.filter(function(r){return r.status==='Pending';}).length;
+  el=document.getElementById('dashDayCount');if(el)el.innerHTML='<strong>'+dayCount+'</strong> day';
+  el=document.getElementById('dashNightCount');if(el)el.innerHTML='<strong>'+nightCount+'</strong> night';
 
-/* ---------- labour requests ---------- */
+  function fill(id,values,label){var select=document.getElementById(id);if(!select)return;var current=select.value;var opts='<option value="all">All '+label+'</option>';values.forEach(function(v){opts+='<option value="'+esc(v)+'">'+esc(v)+'</option>';});select.innerHTML=opts;if(values.indexOf(current)>-1)select.value=current;}
+  fill('dashboardDesignationFilter',lfDashCache.designations,'designations');
+  fill('dashboardDepartmentFilter',lfDashCache.departmentsArr,'departments');
+  fill('dashboardClientFilter',lfDashCache.clients,'clients');
+  var filtered=lfDashCache.deployed;
+  if(shift!=='all')filtered=filtered.filter(function(x){return x.shift.toLowerCase()===shift.toLowerCase();});
+  if(designation!=='all')filtered=filtered.filter(function(x){return x.w.designation===designation;});
+  if(department!=='all')filtered=filtered.filter(function(x){return x.w.department===department;});
+  if(client!=='all')filtered=filtered.filter(function(x){return x.cli&&x.cli.name===client;});
+  if(search)filtered=filtered.filter(function(x){return [x.w.name,x.w.employeeNo,x.w.idNumber,(x.cli&&x.cli.name)||'',x.w.department||'',x.w.designation||''].some(function(v){return String(v||'').toLowerCase().indexOf(search)>-1;});});
+  var pageRows=lfPaginate('dashAtt',filtered,25);
+  var table=document.getElementById('dashboardAttendance');
+  if(table){
+    if(!pageRows.length){
+      table.innerHTML='<tr><td colspan="9"><div class="empty">'+(totalDeployed===0?'No workers are currently deployed. Go to Deployments to assign workers.':'No deployed workers match the current filters.')+'</div></td></tr>';
+    }else{
+      var rows=pageRows.map(function(item){
+        var w=item.w,r=item.r,cli=item.cli,ws=item.shift||'Day';
+        var rowClass=(r.status==='pending'?'dash-row-missing':r.status==='absent'?'dash-row-absent':'');
+        var hours=(r.status==='present'||r.status==='worked')?Number(r.hours||0):'\u2014';
+        var ot=(r.status==='present'||r.status==='worked')?Number(r.overtime||0):'\u2014';
+        var statusHtml=r.status==='present'||r.status==='worked'?'<span class="status status-worked">Present</span>':r.status==='absent'?'<span class="status status-absent">Absent</span>':'<span class="status status-pending">Missing</span>';
+        var shiftClass=((ws||'day').toLowerCase()==='night'?'night':'day');
+        return '<tr class="'+rowClass+'"><td><strong>'+esc(w.name)+'</strong></td><td><span class="muted-chip">'+esc(w.employeeNo||w.idNumber||w.id)+'</span></td><td>'+esc(cli&&cli.name||'\u2014')+'</td><td><span class="shift-badge shift-badge--'+shiftClass+'">'+esc(ws)+'</span></td><td>'+esc(w.designation||'\u2014')+'</td><td>'+esc(w.department||'\u2014')+'</td><td>'+hours+'</td><td>'+ot+'</td><td>'+statusHtml+'</td></tr>';
+      }).join('');
+      table.innerHTML=rows;
+    }
+  }
+  lfRenderPager('dashboardAttendancePager','dashAtt','workers');
+  var rt=document.getElementById('dashboardRequestsTable');
+  if(rt){
+    var pendingReqs=labourRequests.filter(function(r){return r.status==='Pending';}).slice(0,8);
+    if(!pendingReqs.length){
+      rt.innerHTML='<tr><td colspan="6"><div class="empty">No pending requests.</div></td></tr>';
+    }else{
+      rt.innerHTML=pendingReqs.map(function(r){var c=clientById(r.clientId);return '<tr><td><strong>'+esc(r.requestNo)+'</strong></td><td>'+esc(c&&c.name||'\u2014')+'</td><td>'+esc(r.department||'\u2014')+'</td><td>'+r.workersRequired+'</td><td>'+esc(r.startDate||'\u2014')+'</td><td><span class="status status-pending">Pending</span></td></tr>';}).join('');
+    }
+  }
+  var qs=document.getElementById('dashQuickStats');
+  if(qs){
+    var shortfalls=labourRequests.filter(function(r){return r.status==='Approved'||r.status==='Pending';}).filter(function(r){var alloc=(r.allocatedWorkerIds||[]).length;return Math.max(0,r.workersRequired-alloc)>0;}).length;
+    var noDep=workers.filter(function(w){return w.active&&!activeDeployment(w.id);}).length;
+    var nightNoAtt=lfDashCache.deployed.filter(function(x){return (x.shift==='Night'||x.shift==='night')&&x.r.status==='pending';}).length;
+    var activeReqs=labourRequests.filter(function(r){return ['Pending','Approved','Allocated'].indexOf(r.status)>-1;}).length;
+    qs.innerHTML=
+      '<div class="dash-stat-row'+(shortfalls?' dash-stat-row--warn':'')+'"><span>Requests with shortfall</span><strong>'+shortfalls+'</strong></div>'+
+      '<div class="dash-stat-row"><span>Available (not deployed)</span><strong>'+noDep+'</strong></div>'+
+      '<div class="dash-stat-row'+(nightNoAtt?' dash-stat-row--warn':'')+'"><span>Night shift missing</span><strong>'+nightNoAtt+'</strong></div>'+
+      '<div class="dash-stat-row"><span>Day shift deployed</span><strong>'+dayCount+'</strong></div>'+
+      '<div class="dash-stat-row"><span>Night shift deployed</span><strong>'+nightCount+'</strong></div>'+
+      '<div class="dash-stat-row"><span>Active requests</span><strong>'+activeReqs+'</strong></div>';
+  }
+}
+function renderDashboard(){renderFuturisticDashboard();}/* ---------- labour requests ---------- */
 function statusClass(s){return s==="Pending"?"status-pending":s==="Approved"?"status-approved":s==="Allocated"?"status-allocated":s==="Cancelled"?"status-cancelled":s==="Completed"?"status-approved":"status-submitted"}
 function renderRequests(){
  const filterEl=document.getElementById("requestStatusFilter");if(!filterEl)return;
@@ -356,7 +414,7 @@ function renderWorkersBulk(){
  table.innerHTML=pageRows.length?pageRows.map(w=>{
    const deployment=w.client?`${esc(w.client)}<br><small class="muted">${esc(w.assignment||"")}</small>`:'<span class="muted">Unassigned</span>';
    const editBtn=canManageWorkerMasterData()?`<button class="secondary" onclick="editWorker(${w.id})">Edit</button>`:`<button class="secondary" onclick="reportJtsCorrection(${w.id})">Request change</button>`;
-   return `<tr><td><input class="worker-select" type="checkbox" value="${w.id}" ${selected.has(Number(w.id))?"checked":""} onchange="updateWorkerSelection()"></td><td><strong>${esc(w.employeeNo)}</strong></td><td><strong>${esc(w.name)}</strong><br><small class="muted">${esc(w.idNumber||"ID not set")} · ${esc(w.joinDate||"—")}</small></td><td>${esc(w.department)}</td><td>${esc(w.designation||w.classification||"")}</td><td>${money(w.rate)}</td><td>${money(w.otRate)}</td><td>${deployment}</td><td><span class="status ${w.active?"status-worked":"status-absent"}">${w.active?"Active":"Inactive"}</span></td><td>${editBtn} <button class="primary" onclick="openDeploymentModal(${w.id})">Move</button> ${canManageWorkerMasterData()?`<button class="danger" onclick="deleteWorker(${w.id})">Delete</button>`:''}</td></tr>`;
+   return `<tr><td><input class="worker-select" type="checkbox" value="${w.id}" ${selected.has(Number(w.id))?"checked":""} onchange="updateWorkerSelection()"></td><td><strong>${esc(w.employeeNo)}</strong></td><td><strong>${esc(w.name)}</strong><br><small class="muted">${esc(w.idNumber||"ID not set")} · ${esc(w.joinDate||"—")}</small></td><td>${esc(w.department)}</td><td>${esc(w.designation||w.classification||"")}</td><td>${money(w.rate)}</td><td>${money(w.otRate)}</td><td>${deployment}</td><td><span class="status ${w.active?"status-worked":"status-absent"}">${w.active?"Active":"Inactive"}</span></td><td>${editBtn} <button class="primary" onclick="openDeploymentModal(${w.id})">Move</button> ${isSuperAdmin()?`<button class="danger" onclick="hardDeleteWorker(${w.id})">Cloud Delete</button>`:canManageWorkerMasterData()?`<button class="danger" onclick="deleteWorker(${w.id})">Delete</button>`:''}</td></tr>`;
  }).join(''):'<tr><td colspan="10"><div class="empty">No workers found.</div></td></tr>';
  lfRenderPager('workersPager','workers','workers');
  updateWorkerSelection();
@@ -377,6 +435,7 @@ function deleteWorker(id){
  renderWorkers();rerenderIfActive('departments');rerenderIfActive('availability');
  showToast(`${w.employeeNo} deleted.`);
 }
+async function hardDeleteWorker(id){if(!isSuperAdmin()){showToast("Only super admin can permanently delete workers from cloud.");return;}const w=workers.find(x=>Number(x.id)===Number(id));if(!w)return;if(!confirm(`PERMANENTLY delete worker ${w.employeeNo} — ${w.name} from cloud database? This removes their attendance history and deployments too. This cannot be undone.`))return;await cloudDeleteWorker(id);workers=workers.filter(x=>Number(x.id)!==Number(id));Object.keys(attendance).forEach(date=>{const day=attendance[date];if(day&&day.records)delete day.records[id];});if(typeof deployments!=='undefined'&&Array.isArray(deployments))deployments=deployments.filter(d=>Number(d.workerId)!==Number(id));if(typeof jtsState!=="undefined"){jtsState.corrections=jtsState.corrections.filter(c=>Number(c.workerId)!==Number(id));jtsState.disputes=jtsState.disputes.filter(c=>Number(c.workerId)!==Number(id));}if(typeof audit==='function')audit('Worker hard-deleted from cloud',w.employeeNo,w.name);saveData();if(typeof saveAdvanced==='function')saveAdvanced();renderWorkers();rerenderIfActive('departments');rerenderIfActive('availability');showToast(`${w.employeeNo} permanently deleted from cloud.`);}
 function updateWorkerSelection(){const selected=document.querySelectorAll(".worker-select:checked").length,count=document.getElementById("workerSelectionCount");if(count)count.textContent=`${selected} selected`;}
 function toggleAllWorkers(checked){document.querySelectorAll(".worker-select").forEach(input=>input.checked=checked);updateWorkerSelection();}
 function applyWorkerBulkAction(){if(!canManageWorkerMasterData()){showToast("Only accountant / HR can apply worker changes.");return;}const ids=[...document.querySelectorAll(".worker-select:checked")].map(input=>Number(input.value)),action=document.getElementById("workerBulkAction")?.value;if(!ids.length){showToast("Select at least one worker.");return;}if(!action){showToast("Choose a bulk action first.");return;}let value;if(action==='delete'){if(!confirm(`Delete ${ids.length} worker(s) permanently? This removes their attendance history too.`))return;const idSet=new Set(ids);workers=workers.filter(w=>!idSet.has(Number(w.id)));Object.keys(attendance).forEach(date=>{const day=attendance[date];if(day&&day.records){ids.forEach(id=>{delete day.records[id];});}});if(typeof deployments==='object'&&Array.isArray(deployments))deployments=deployments.filter(d=>!idSet.has(Number(d.workerId)));saveData();if(typeof saveAdvanced==='function')saveAdvanced();renderWorkers();showToast(`Deleted ${ids.length} worker(s).`);return;}if(action==='department'){value=prompt(`Move ${ids.length} worker(s) to which department?`,departments[0]?.name||'');if(value===null)return;value=value.trim();if(!departments.some(d=>d.name.toLowerCase()===value.toLowerCase())){showToast("Department not found. Add it first.");return;}ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w)w.department=value;});}else if(action==='designation'){value=prompt(`Assign which designation to ${ids.length} worker(s)?`,"");if(value===null||!value.trim())return;ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w)w.designation=value.trim();});}else if(action==='rates'){const rate=prompt('Daily rate (KSh):','');if(rate===null)return;const otRate=prompt('OT hourly rate (KSh):','');if(otRate===null)return;if(Number(rate)<=0||Number(otRate)<=0){showToast('Rates must be greater than zero.');return;}ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w){w.rate=Number(rate);w.otRate=Number(otRate);}});}else ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w)w.active=action==='activate';});saveData();renderWorkers();showToast(`Updated ${ids.length} worker(s).`);}
@@ -388,12 +447,17 @@ function openDeploymentModal(id){ensureModal('deploymentModal');const w=workers.
 function saveDeployment(){const id=Number(document.getElementById("deploymentWorkerId").value),w=workers.find(x=>x.id===id),clientId=Number(document.getElementById("deploymentClient").value),department=document.getElementById("deploymentDepartment").value,start=document.getElementById("deploymentStartDate").value,assignment=document.getElementById("deploymentAssignment").value.trim(),requestId=Number(document.getElementById("deploymentRequest").value)||null;if(!w||!clientId||!department||!start){alert("Select a client, department and start date.");return}w.client=clientById(clientId)?.name||"";w.department=department;w.assignment=assignment||"Direct deployment";w.deploymentStart=start;if(requestId){const r=requestById(requestId);if(r&&!r.allocatedWorkerIds.includes(w.id))r.allocatedWorkerIds.push(w.id);if(r&&r.allocatedWorkerIds.length)r.status="Allocated"}saveData();closeModal("deploymentModal");renderWorkers();showToast(`${w.employeeNo} deployed successfully.`)}
 
 /* ---------- clients / departments ---------- */
-function renderClients(){const table=document.getElementById("clientsTable");if(!table)return;table.innerHTML=clients.map(c=>{const reqs=labourRequests.filter(r=>r.clientId===c.id&&!['Completed','Cancelled'].includes(r.status));const allocated=new Set(reqs.flatMap(r=>r.allocatedWorkerIds||[])).size;return `<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.contact||"—")}</td><td>${esc(c.phone||"—")}</td><td>${reqs.length}</td><td>${allocated}</td><td><span class="status ${c.active?"status-worked":"status-absent"}">${c.active?"Active":"Inactive"}</span></td><td><button class="secondary" onclick="editClient(${c.id})">Edit</button> <button class="${c.active?"danger":"success"}" onclick="toggleClient(${c.id})">${c.active?"Deactivate":"Activate"}</button></td></tr>`}).join('')||'<tr><td colspan="7"><div class="empty">No clients yet.</div></td></tr>'}
+function isSuperAdmin(){return currentRoleName()==='super_admin';}
+function cloudDeleteClient(id){const remoteId=clientRemote(id);if(!remoteId)return Promise.resolve();return labourForceSupabase.from('clients').delete().eq('id',remoteId).then(({error})=>{if(error)console.warn('[LF] cloudDeleteClient:',error.message);});}
+function cloudDeleteDepartment(name){const remoteId=deptRemote(name);if(!remoteId)return Promise.resolve();return labourForceSupabase.from('departments').delete().eq('id',remoteId).then(({error})=>{if(error)console.warn('[LF] cloudDeleteDepartment:',error.message);});}
+function cloudDeleteWorker(id){const remoteId=workerRemote(id);if(!remoteId)return Promise.resolve();return labourForceSupabase.from('workers').delete().eq('id',remoteId).then(({error})=>{if(error)console.warn('[LF] cloudDeleteWorker:',error.message);});}
+async function hardDeleteClient(id){if(!isSuperAdmin()){showToast("Only super admin can permanently delete clients.");return;}const c=clientById(id);if(!c)return;if(!confirm(`PERMANENTLY delete client "${c.name}" from cloud database? This cannot be undone.`))return;await cloudDeleteClient(id);clients=clients.filter(x=>x.id!==id);saveData();populateClientSelects();renderClients();showToast(`Client "${c.name}" deleted from cloud.`);}
+function renderClients(){const table=document.getElementById("clientsTable");if(!table)return;const isSA=isSuperAdmin();table.innerHTML=clients.map(c=>{const reqs=labourRequests.filter(r=>r.clientId===c.id&&!['Completed','Cancelled'].includes(r.status));const allocated=new Set(reqs.flatMap(r=>r.allocatedWorkerIds||[])).size;const actions=isSA?`<button class="secondary" onclick="editClient(${c.id})">Edit</button> <button class="danger" onclick="hardDeleteClient(${c.id})">Delete</button>`:`<button class="secondary" onclick="editClient(${c.id})">Edit</button> <button class="${c.active?"danger":"success"}" onclick="toggleClient(${c.id})">${c.active?"Deactivate":"Activate"}</button>`;return `<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.contact||"—")}</td><td>${esc(c.phone||"—")}</td><td>${reqs.length}</td><td>${allocated}</td><td><span class="status ${c.active?"status-worked":"status-absent"}">${c.active?"Active":"Inactive"}</span></td><td>${actions}</td></tr>`}).join('')||'<tr><td colspan="7"><div class="empty">No clients yet.</div></td></tr>'}
 function openClientModal(){ensureModal('clientModal');document.getElementById("editingClientId").value="";document.getElementById("clientModalTitle").textContent="Add Client";document.getElementById("clientName").value="";document.getElementById("clientContact").value="";document.getElementById("clientPhone").value="";document.getElementById("clientModal").classList.add("show")}
 function editClient(id){ensureModal('clientModal');const c=clientById(id);if(!c)return;openClientModal();document.getElementById("editingClientId").value=id;document.getElementById("clientModalTitle").textContent="Edit Client";document.getElementById("clientName").value=c.name;document.getElementById("clientContact").value=c.contact||"";document.getElementById("clientPhone").value=c.phone||""}
 function saveClient(){const id=document.getElementById("editingClientId").value,name=document.getElementById("clientName").value.trim(),contact=document.getElementById("clientContact").value.trim(),phone=document.getElementById("clientPhone").value.trim();if(!name){alert("Enter the company name.");return}if(id){const c=clientById(id);Object.assign(c,{name,contact,phone});showToast("Client updated.")}else{clients.push({id:Date.now(),name,contact,phone,active:true});showToast("Client added.")}saveData();closeModal("clientModal");populateClientSelects();renderClients()}
 function toggleClient(id){const c=clientById(id);if(!c)return;c.active=!c.active;saveData();populateClientSelects();renderClients();showToast(c.active?`${c.name} activated.`:`${c.name} deactivated.`)}
-function renderDepartments(){const table=document.getElementById("departmentsTable");if(!table)return;const canEdit=canManageWorkerMasterData();table.innerHTML=departments.map((d,i)=>{const count=workers.filter(w=>w.active&&w.department===d.name).length;const actions=canEdit?`<button class="secondary" onclick="editDepartment(${i})">Edit</button> <button class="danger" onclick="deleteDepartment(${i})">Delete</button>`:'—';return `<tr><td><strong>${esc(d.name)}</strong></td><td>${esc(d.parent||"—")}</td><td>${count}</td><td>${d.rate?money(d.rate):'Worker rate'}</td><td>${d.otRate?money(d.otRate):'Worker rate'}</td><td>${actions}</td></tr>`}).join('')||'<tr><td colspan="6"><div class="empty">No departments yet.</div></td></tr>'}
+function renderDepartments(){const table=document.getElementById("departmentsTable");if(!table)return;const canEdit=canManageWorkerMasterData();const isSA=isSuperAdmin();table.innerHTML=departments.map((d,i)=>{const count=workers.filter(w=>w.active&&w.department===d.name).length;const actions=isSA?`<button class="secondary" onclick="editDepartment(${i})">Edit</button> <button class="danger" onclick="hardDeleteDepartment(${i})">Delete</button>`:canEdit?`<button class="secondary" onclick="editDepartment(${i})">Edit</button> <button class="danger" onclick="deleteDepartment(${i})">Delete</button>`:'—';return `<tr><td><strong>${esc(d.name)}</strong></td><td>${esc(d.parent||"—")}</td><td>${count}</td><td>${d.rate?money(d.rate):'Worker rate'}</td><td>${d.otRate?money(d.otRate):'Worker rate'}</td><td>${actions}</td></tr>`}).join('')||'<tr><td colspan="6"><div class="empty">No departments yet.</div></td></tr>'}
 function openDepartmentModal(){ensureModal('departmentModal');document.getElementById("departmentModalTitle").textContent="Add Department";document.getElementById("departmentOriginalName").value="";populateFilters();document.getElementById("departmentName").value="";document.getElementById("departmentRate").value="";document.getElementById("departmentOtRate").value="";document.getElementById("departmentModal").classList.add("show")}
 function editDepartment(index){
  if(!canManageWorkerMasterData()){showToast("Only accountant / HR can edit department master data.");return;}
@@ -443,6 +507,7 @@ function deleteDepartment(index){
  populateFilters();renderDepartments();renderWorkers();rerenderIfActive('availability');
  showToast(`Department ${d.name} deleted.`);
 }
+async function hardDeleteDepartment(index){if(!isSuperAdmin()){showToast("Only super admin can permanently delete departments from cloud.");return;}const d=departments[index];if(!d)return;const activeWorkers=workers.filter(w=>w.active&&w.department===d.name);if(activeWorkers.length&&!confirm(`${activeWorkers.length} active worker(s) belong to "${d.name}". Delete anyway? Their department will be cleared.`))return;if(!confirm(`PERMANENTLY delete department "${d.name}" from cloud database? This cannot be undone.`))return;await cloudDeleteDepartment(d.name);workers.forEach(w=>{if(w.department===d.name)w.department="";});if(typeof deployments!=='undefined'&&Array.isArray(deployments))deployments.forEach(dep=>{if(dep.department===d.name)dep.department="";});departments=departments.filter(x=>x!==d);if(typeof audit==='function')audit('Department hard-deleted from cloud',d.name,'');saveData();if(typeof saveAdvanced==='function')saveAdvanced();populateFilters();renderDepartments();renderWorkers();rerenderIfActive('availability');showToast(`Department "${d.name}" permanently deleted from cloud.`);}
 
 /* ---------- payroll (memoized + paginated) ---------- */
 let lfPayrollCache={key:'',result:null};
@@ -492,7 +557,64 @@ function renderReports(){
 
 /* ---------- JTS roll call (read-only render, explicit roster) ---------- */
 function JtsWorkerById(id){return workers.find(w=>Number(w.id)===Number(id))||null}
-function ensureJtsWorkerSelect(){const sel=document.getElementById("jtsHistoryWorker");if(!sel)return;sel.innerHTML="";workers.filter(w=>w.active).forEach(w=>{const label=`${w.name} (${w.idNumber||w.employeeNo||w.id})`;const opt=document.createElement("option");opt.value=String(w.id);opt.textContent=label;sel.appendChild(opt)});if(!sel.value && workers.length){sel.value=String(workers[0].id)}}
+/* ---------- JTS History: search-based worker picker ---------- */
+/* The previous <select>-based picker was replaced with a free-text search field
+   that filters workers by name, employee number, or national ID. Selecting a
+   match from the dropdown list renders that worker's history. */
+window.lfJtsCurrentHistoryWorker=null;
+/* Active workers matching the search query (case-insensitive, partial match
+   against name, employeeNo, idNumber, nssfNumber). */
+function filterJtsHistoryWorkers(query){
+  const q=(query||'').toLowerCase().trim();
+  return workers.filter(w=>w.active).filter(w=>!q||[w.name,w.employeeNo,w.idNumber,w.nssfNumber].some(v=>String(v||'').toLowerCase().includes(q)));
+}
+/* Renders the matches dropdown under the search field. Highlights the row that
+   matches currentWorkerId so the user can see who they're viewing. */
+function renderJtsHistoryMatches(matches,currentWorkerId){
+  const container=document.getElementById("jtsHistoryMatches");
+  if(!container)return;
+  if(!matches.length){container.innerHTML='<div class="jts-hm-empty">No workers match your search.</div>';return;}
+  const MAX=20;
+  const shown=matches.slice(0,MAX);
+  const html=shown.map(w=>`<button type="button" class="jts-hm-item${Number(w.id)===Number(currentWorkerId)?' jts-hm-item--selected':''}" data-id="${w.id}">
+    <span class="jts-hm-name">${esc(w.name)}</span>
+    <small class="jts-hm-meta">${esc(w.designation||'—')} • ${esc(w.employeeNo||w.idNumber||w.id)} • ${esc(w.department||'')}</small>
+  </button>`).join('');
+  container.innerHTML=html+(matches.length>MAX?`<div class="jts-hm-more">${matches.length-MAX} more workers — keep typing to narrow down</div>`:'');
+  /* Wire each button's click to selectJtsHistoryWorker — declared inline so
+     the markup stays portable and avoids needing a global delegation. */
+  container.querySelectorAll('.jts-hm-item').forEach(btn=>{
+    btn.addEventListener('click',()=>selectJtsHistoryWorker(btn.dataset.id));
+  });
+}
+/* Closes the matches dropdown (called when user clicks outside the picker). */
+function closeJtsHistoryPicker(){
+  const container=document.getElementById("jtsHistoryMatches");
+  if(container)container.innerHTML='';
+}
+/* Called when the user picks a worker from the dropdown. */
+function selectJtsHistoryWorker(workerId){
+  window.lfJtsCurrentHistoryWorker=Number(workerId);
+  closeJtsHistoryPicker();
+  const input=document.getElementById("jtsHistorySearch");
+  if(input){
+    const worker=JtsWorkerById(workerId);
+    if(worker){
+      const label=`${worker.name} (${worker.employeeNo||worker.idNumber||worker.id})`;
+      input.value=label;
+      input.placeholder=`Showing history for ${worker.name}`;
+    }else{
+      input.value='';
+      input.placeholder='Search worker name or ID...';
+    }
+  }
+  renderJtsHistory();
+}
+/* Auto-close the dropdown when the user clicks anywhere outside the picker. */
+document.addEventListener('click',function(e){
+  const picker=document.getElementById("jtsHistoryPicker");
+  if(picker&&!picker.contains(e.target))closeJtsHistoryPicker();
+});
 function getJtsRecordFor(date,workerId){const day=getDayRecord(date);if(!day.records[workerId])day.records[workerId]={status:"pending",hours:0,overtime:0};return day.records[workerId]}
 function normalizeText(value){return String(value ?? "").replace(/\s+/g," ").trim()}
 function numberFromCell(value){const n = Number(String(value ?? '').replace(/[^0-9.\-]/g, ''));return Number.isFinite(n) ? n : 0;}
@@ -570,9 +692,17 @@ function renderJtsAttendance(){
  lfRenderPager('jtsAttendancePager','jtsAtt','workers');
 }
 function renderJtsHistory(){
- ensureJtsWorkerSelect();
- const workerId=Number(document.getElementById("jtsHistoryWorker")?.value)||workers[0]?.id;
+ /* Page is intentionally blank until the user picks a worker from the search
+    picker. No auto-selection — sticking on the first person was confusing. */
+ const workerId=window.lfJtsCurrentHistoryWorker;
  const table=document.getElementById("jtsHistoryTable");if(!table)return;
+ if(!workerId){
+   const summary=document.getElementById("jtsRollup");
+   if(summary)summary.innerHTML='';
+   table.innerHTML='<tr><td colspan="6"><div class="empty">Search for a worker above to view their attendance history.</div></td></tr>';
+   lfRenderPager('jtsHistoryPager','jtsHist','days');
+   return;
+ }
  const history=Object.entries(attendance).map(([date,day])=>{const rec=day.records&&day.records[workerId]?day.records[workerId]:null;return rec?{date,status:rec.status,hours:Number(rec.hours||0),overtime:Number(rec.overtime||0),verification_status:rec.verification_status}:null}).filter(Boolean).sort((a,b)=>b.date.localeCompare(a.date));
  const disputes=jtsState.disputes.filter(d=>Number(d.workerId)===Number(workerId));
  const totalHours=history.reduce((sum,item)=>sum+Number(item.hours||0),0);
@@ -779,6 +909,30 @@ LF_PAGER_RERENDER.payroll=()=>renderPayroll();
  wire('supervisorSearch',()=>renderSupervisorPortal());
  wire('jtsPayrollSearch',()=>renderJtsPayroll());
  wire('userSearch',()=>{if(typeof renderUsers==='function')renderUsers();});
+ /* JTS History worker search: as the user types, show matching workers
+    in a dropdown list. Pressing Enter while exactly one match is shown
+    selects that worker. Clearing the input reverts to the currently
+    selected worker (or shows the empty picker if none picked). */
+ const lfJtsSearchInput=document.getElementById('jtsHistorySearch');
+ if(lfJtsSearchInput){
+  lfJtsSearchInput.addEventListener('input',()=>{
+   const matches=filterJtsHistoryWorkers(lfJtsSearchInput.value);
+   renderJtsHistoryMatches(matches,window.lfJtsCurrentHistoryWorker);
+  });
+  lfJtsSearchInput.addEventListener('focus',()=>{
+   const matches=filterJtsHistoryWorkers(lfJtsSearchInput.value);
+   renderJtsHistoryMatches(matches,window.lfJtsCurrentHistoryWorker);
+  });
+  lfJtsSearchInput.addEventListener('keydown',e=>{
+   if(e.key==='Enter'){
+    e.preventDefault();
+    const matches=filterJtsHistoryWorkers(lfJtsSearchInput.value);
+    if(matches.length===1)selectJtsHistoryWorker(matches[0].id);
+   }else if(e.key==='Escape'){
+    closeJtsHistoryPicker();
+   }
+  });
+ }
  /* The app only renders once the user is authenticated: supabase.js
     dismisses the login gate and dispatches 'labourforce:ready'. */
  let lfAppRendered=false;

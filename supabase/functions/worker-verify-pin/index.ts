@@ -24,7 +24,7 @@ const corsHeaders = {
 // Bcrypt hash for 'jts' (cost 10). Workers must change on first login.
 const DEFAULT_PIN_HASH = '$2b$10$00000000000000000000uPzp7wM2r6hY0X3b9aLqJ4YH5Z6W7M8N'
 
-async function buildSessionToken(workerId: number, supabase: any): Promise<string> {
+async function buildSessionToken(workerId: string, supabase: any): Promise<string> {
   // A cryptographically random 64-char hex string. Stored in worker_sessions
   // table so Edge Functions can look up the worker_id for any given token.
   // Expires after 8 hours (dies with a typical workday).
@@ -95,13 +95,13 @@ Deno.serve(async (req) => {
   )
 
   // 1. Look up the worker
-  // The UI labels the field "National ID" but historically the field stored
-  // employee_no/staff_no. Support all three so workers can log in with whatever
-  // identifier they know: employee_no, staff_no, or id_number (National ID).
+  // The UI labels the field "National ID" but the worker can log in with
+  // either their employee_no (staff number) or their id_number (national ID).
+  // workers.id is a uuid — worker_id is always treated as a string below.
   const { data: worker, error: werr } = await supabase
     .from('workers')
-    .select('id, staff_no, id_number, name, active')
-    .or(`staff_no.eq.${employeeNo},id_number.eq.${employeeNo}`)
+    .select('id, employee_no, id_number, full_name, active')
+    .or(`employee_no.eq.${employeeNo},id_number.eq.${employeeNo}`)
     .limit(1)
     .single()
   if (werr || !worker) {
@@ -143,8 +143,8 @@ Deno.serve(async (req) => {
   return new Response(JSON.stringify({
     ok: true,
     worker_id:     worker.id,
-    employee_no:   worker.staff_no || worker.id_number,
-    full_name:     worker.name,
+    employee_no:   worker.employee_no || worker.id_number,
+    full_name:     worker.full_name,
     is_default:    pinRow.is_default,
     session_token: sessionToken,
   }), { headers: { ...corsHeaders, 'content-type': 'application/json' } })

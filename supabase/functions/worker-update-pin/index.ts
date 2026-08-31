@@ -73,14 +73,15 @@ Deno.serve(async (req) => {
       { status: 400, headers: { ...corsHeaders, 'content-type': 'application/json' } })
   }
 
-  const workerId    = Number(body.worker_id)
-  const oldPin      = String(body.old_pin || '').trim()
-  const newPin      = String(body.new_pin || '').trim()
-  const confirmPin  = String(body.confirm_pin || '').trim()
+  // worker_id is a UUID string from the workers table, NOT a numeric ID.
+  const workerId     = String(body.worker_id || '').trim()
+  const oldPin       = String(body.old_pin || '').trim()
+  const newPin       = String(body.new_pin || '').trim()
+  const confirmPin   = String(body.confirm_pin || '').trim()
   const sessionToken = String(body.session_token || '').trim()
 
   // Basic validation
-  if (!workerId || isNaN(workerId)) {
+  if (!workerId) {
     return new Response(JSON.stringify({ ok: false, error: 'invalid_worker' }),
       { status: 400, headers: { ...corsHeaders, 'content-type': 'application/json' } })
   }

@@ -53,7 +53,7 @@
 .lf-gate .lf-login-card input{width:100%;padding:12px}
 .lf-gate-note{margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,.08);color:#7f929f;font-size:10.5px;text-align:center;letter-spacing:.3px}
 /* ============================================================
-   UI POLISH — global micro-improvements
+   UI POLISH ï¿½ global micro-improvements
    ============================================================ */
 /* Better keyboard focus visibility across the app */
 input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
@@ -69,3 +69,44 @@ tbody tr{transition:background .12s}
 .lf-skel{background:linear-gradient(90deg,#f1f5f9 0%,#e2e8f0 50%,#f1f5f9 100%);background-size:200% 100%;animation:lf-skel 1.2s ease-in-out infinite;border-radius:6px}
 @keyframes lf-skel{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .lf-btn-text{transition:opacity .2s}.lf-btn-spinner{display:none;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:lf-spin .7s linear infinite;vertical-align:middle;margin-left:6px}button.primary.loading .lf-btn-text{opacity:0}button.primary.loading .lf-btn-spinner{display:inline-block}@keyframes lf-spin{to{transform:rotate(360deg)}}
+
+/* ============================================================
+   USERS & ACCESS â€” role overview cards
+   ============================================================ */
+.roles-overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.roles-overview:empty{display:none}
+.role-card{padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:rgba(17,39,31,.55);transition:border-color .15s,background .15s}
+.role-card:hover{border-color:rgba(105,210,160,.35);background:rgba(22,55,42,.65)}
+.role-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.role-card-head strong{color:var(--green-400);font-size:12px;letter-spacing:.3px}
+.role-card .permission-chip{font-size:10.5px;padding:4px 7px}
+.role-card .muted-chip{color:var(--muted);border-color:rgba(116,214,173,.12);background:rgba(255,255,255,.02)}
+.role-card[data-role-id=""]{display:none}
+
+/* Ensure form-grid inside modal looks right with the new field layout */
+.modal .form-grid{margin-bottom:14px}
+.modal .form-group small{font-size:11px;color:var(--muted)}
+
+/* Highlight active filter / search */
+.section-header .controls input[type=search]:focus,.section-header .controls select:focus{border-color:var(--green-400);box-shadow:0 0 0 2px rgba(105,210,160,.12)}
+
+/* Friendly empty/error states for the users table */
+#usersTable .empty{padding:32px 20px}
+#usersTable .empty button{margin-top:8px}
+/* ============================================================
+   JTS HISTORY WORKER SEARCH PICKER
+   ============================================================ */
+.jts-history-picker{position:relative;max-width:480px;margin:0 20px 0 0;padding:14px 18px 0;border-bottom:1px solid var(--line)}
+#jtsHistorySearch{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;color:var(--text);background:#fff;transition:border-color .15s,box-shadow .15s;box-sizing:border-box}
+#jtsHistorySearch:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 2px rgba(22,163,74,.15)}
+#jtsHistorySearch::placeholder{color:var(--muted)}
+.jts-history-matches{position:absolute;left:18px;right:18px;top:calc(14px + 40px);background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:200;max-height:360px;overflow-y:auto;overflow-x:hidden}
+.jts-hm-empty{padding:14px 16px;color:var(--muted);font-size:13px;text-align:center;font-style:italic}
+.jts-hm-item{display:flex;flex-direction:column;gap:2px;width:100%;padding:10px 14px;border:0;border-bottom:1px solid var(--line);background:transparent;text-align:left;cursor:pointer;font-size:14px;color:var(--text);transition:background .1s}
+.jts-hm-item:last-child{border-bottom:none}
+.jts-hm-item:hover,.jts-hm-item:focus{background:rgba(22,163,74,.08);outline:none}
+.jts-hm-item--selected{background:rgba(22,163,74,.14)}
+.jts-hm-item--selected .jts-hm-name{font-weight:600;color:var(--green)}
+.jts-hm-name{font-weight:500}
+.jts-hm-meta{color:var(--muted);font-size:12px}
+.jts-hm-more{padding:10px 14px;font-size:12px;color:var(--muted);font-style:italic;border-top:1px solid var(--line);text-align:center}

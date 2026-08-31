@@ -476,43 +476,58 @@ async function hydrateAttendanceFromBackend(){
     // fetching ALL attendance rows on every page load, blocking for many seconds.
     const cutoff=new Date(); cutoff.setDate(cutoff.getDate()-90);
     const since=cutoff.toISOString().split('T')[0];
-    const RICH='attendance_date,worker_id,status,overtime_hours,time_in,time_out,submitted_at,remarks,supervisor_id';
-    while(hasMore){
-      let data=null, err=null;
-      try{
-        const a=await labourForceSupabase.from('attendance').select(RICH)
-          .gte('attendance_date',since).order('attendance_date',{ascending:false}).range(from,from+pageSize-1);
-        if(a.error){
-          /* 42703 = column does not exist. The deployed schema may not have
-             time_in/time_out/remarks/supervisor_id etc., so fall back to a
-             narrower safe set, then to `*`. Crucially the fallback must NOT
-             keep selecting the missing column or it re-fails with 42703. */
-          if(a.error.code!=='42703') throw a.error;
-          const b=await labourForceSupabase.from('attendance').select('attendance_date,worker_id,status,overtime_hours')
-            .gte('attendance_date',since).order('attendance_date',{ascending:false}).range(from,from+pageSize-1);
-          if(b.error){
-            if(b.error.code!=='42703') throw b.error;
-            const c=await labourForceSupabase.from('attendance').select('*')
-              .gte('attendance_date',since).order('attendance_date',{ascending:false}).range(from,from+pageSize-1);
-            if(c.error) throw c.error;
-            data=c.data;
-          } else { data=b.data; }
-        } else { data=a.data; }
-      }catch(e){ err=e; }
-      if(err) throw err;
-      if(data) remoteRows.push(...data);
-      hasMore = (data||[]).length === pageSize;
-      from += pageSize;
+    // Column sets tried from richest to bare minimum. The live database may not
+    // have time_in / time_out / remarks / supervisor_id — fall through until a
+    // query succeeds, or until we hit a non-schema error (offset past end, table
+    // missing). Supabase client never throws; errors come back in result.error.
+    const COL_SETS=[
+      'attendance_date,worker_id,status,overtime_hours,time_in,time_out,submitted_at,remarks,supervisor_id',
+      'attendance_date,worker_id,status,overtime_hours',
+      'id,worker_id,attendance_date,status'
+    ];
+    const MAX_PAGES=20;
+    let pages=0;
+    while(hasMore && pages<MAX_PAGES){
+      pages++;
+      let data=null;
+      // Try each column set in order until one succeeds.
+      // 42703 = column does not exist → try next narrower set.
+      // Any other 400 (offset past end, table missing) → stop the loop entirely.
+      outer:
+      for(const cols of COL_SETS){
+        const res=await labourForceSupabase.from('attendance')
+          .select(cols).gte('attendance_date',since)
+          .order('attendance_date',{ascending:false}).range(from,from+pageSize-1);
+        if(res.error){
+          if(res.error.code==='42703') continue outer;  // missing col → next set
+          data=null; break outer;  // any other 400 → stop paginating
+        }
+        data=res.data; break outer;  // success
+      }
+      if(!data){ break; }  // all column sets exhausted or non-42703 error → stop
+      remoteRows.push(...data);
+      hasMore=data.length===pageSize;
+      from+=pageSize;
     }
     if(!remoteRows.length) return;
 
+    // attendance_approvals: try rich set → narrower → bare minimum.
+    // The deployed table may be missing columns added in later migrations.
     let approvalRows=[];
-    try{
-      const {data:apps,error:appErr}=await labourForceSupabase
-        .from('attendance_approvals')
-        .select('attendance_date,status,submitted_at,approved_at,remarks');
-      if(!appErr && apps) approvalRows=apps;
-    }catch(_){ /* optional table, ignore */ }
+    const APPROVAL_COLS=[
+      'attendance_date,status,submitted_at,approved_at,remarks',
+      'attendance_date,status,submitted_at,approved_at',
+      'attendance_date,status'
+    ];
+    for(const cols of APPROVAL_COLS){
+      const r=await labourForceSupabase.from('attendance_approvals').select(cols);
+      if(r.error){
+        if(r.error.code==='42703') continue;  // missing col → next set
+        break;  // any other error (table missing, RLS denied) → stop
+      }
+      if(r.data) approvalRows=r.data;
+      break;
+    }
 
     const map=lfMap();
     const remoteByLocalWorker=new Map();
@@ -739,7 +754,7 @@ function installSaveHook(){
   // do NOT need the expensive full-history flag.
   const original=window.saveData;
   if(!original || original.__lfWrapped)return;
-  const ATT_MUTATORS=/changeAttendanceStatus|changeOvertime|markAllWorked|submitAttendance|approveAttendance|verifyAttendanceRecord|verifyAllWorked|setJtsStatus|changeJtsHours|changeJtsOt|editSupervisorRecord|cancelSupervisorRecord|markSupervisorPresent|generateJtsRoster|ensureJtsRosterForDate/;
+  const ATT_MUTATORS=/changeAttendanceStatus|changeOvertime|markAllWorked|submitAttendance|approveAttendance|submitSupervisorAttendance|verifyAttendanceRecord|verifyAllWorked|setJtsStatus|changeJtsHours|changeJtsOt|editSupervisorRecord|cancelSupervisorRecord|markSupervisorPresent|generateJtsRoster|ensureJtsRosterForDate/;
   // ATT_MUTATORS now use queueAttendanceSync() instead of queueBackendSync(),
   // which only syncs the attendance table � workers/departments/clients/requests
   // are NOT re-uploaded on every attendance click. This saves 3-5 MB of
@@ -750,8 +765,8 @@ function installSaveHook(){
     original();
     if(isRenderCall)return;
     if(typeof LF_PHASE2!='undefined'&&LF_PHASE2===true){
-      if(/submitAttendance|approveAttendance/.test(stack)){
-        const dEl=document.getElementById('approvalDate')||document.getElementById('attendanceDate');
+      if(/submitAttendance|approveAttendance|submitSupervisorAttendance/.test(stack)){
+        const dEl=document.getElementById('approvalDate')||document.getElementById('attendanceDate')||document.getElementById('supervisorDate');
         const date=dEl?.value||new Date().toISOString().slice(0,10);
         const mode=stack.includes('approveAttendance')?'approve':'submit';
         lfSaveAttendanceApproval(date,mode).catch(e=>console.warn('[LF] lfSaveAttendanceApproval:',e.message));

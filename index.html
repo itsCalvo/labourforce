@@ -64,20 +64,47 @@
 
 <section id="dashboard" class="page active">
     <div class="cards">
-        <div class="card"><span class="card-icon">👥</span><div class="card-label">Active Workers</div><div class="card-value" id="dashboardWorkers">0</div><div class="card-sub">Currently registered</div></div>
-        <div class="card"><span class="card-icon">📋</span><div class="card-label">Pending Requests</div><div class="card-value" id="dashboardRequests">0</div><div class="card-sub">Awaiting action</div></div>
-        <div class="card"><span class="card-icon">✓</span><div class="card-label">Worked Today</div><div class="card-value" id="dashboardWorked">0</div><div class="card-sub">Attendance recorded</div></div>
-        <div class="card"><span class="card-icon">!</span><div class="card-label">Missing</div><div class="card-value" id="dashboardMissing">0</div><div class="card-sub">Needs attention</div></div>
+        <div class="card card-clickable" id="dashCardOnBoard"><span class="card-icon">🔄</span><div class="card-label">On Board</div><div class="card-value" id="dashboardOnBoard">0</div><div class="card-sub">Currently deployed</div></div>
+        <div class="card card-clickable" id="dashCardPresent"><span class="card-icon">✓</span><div class="card-label">Present Today</div><div class="card-value" id="dashboardPresent">0</div><div class="card-sub">Recorded present</div></div>
+        <div class="card card-clickable" id="dashCardAbsent"><span class="card-icon">✗</span><div class="card-label">Absent / Missing</div><div class="card-value" id="dashboardAbsent">0</div><div class="card-sub">Need attention</div></div>
+        <div class="card card-clickable" id="dashCardRequests" onclick="showPage('requests')"><span class="card-icon">📋</span><div class="card-label">Pending Requests</div><div class="card-value" id="dashboardPendingRequests">0</div><div class="card-sub">Awaiting approval</div></div>
+    </div>
+
+    <!-- Shift toggle + date bar -->
+    <div class="dash-shift-bar" id="dashShiftBar">
+        <div class="dash-shift-group">
+            <button class="dash-shift-btn dash-shift-btn--active" data-shift="all" onclick="dashSetShift('all')">All Deployed</button>
+            <button class="dash-shift-btn" data-shift="day" onclick="dashSetShift('day')">☀ Day Shift</button>
+            <button class="dash-shift-btn" data-shift="night" onclick="dashSetShift('night')">🌙 Night Shift</button>
+        </div>
+        <div class="dash-shift-meta">
+            <span class="dash-shift-stat" id="dashDayCount"><strong>0</strong> day</span>
+            <span class="dash-shift-stat" id="dashNightCount"><strong>0</strong> night</span>
+            <span class="dash-shift-divider">|</span>
+            <input type="date" id="dashboardDate" onchange="renderFuturisticDashboard()">
+        </div>
     </div>
     <div class="section dashboard-command">
-        <div class="section-header"><div><h2>Workforce Command Board</h2><small class="muted">Live attendance by designation and department</small></div><div class="controls"><input type="date" id="dashboardDate" onchange="renderFuturisticDashboard()"><input type="search" id="dashboardWorkerSearch" placeholder="Search present workers..." autocomplete="off"><select id="dashboardDesignationFilter" onchange="renderFuturisticDashboard()"><option value="all">All designations</option></select><select id="dashboardDepartmentFilter" onchange="renderFuturisticDashboard()"><option value="all">All departments</option></select><button class="primary" onclick="showPage('attendance')">Record Attendance</button></div></div>
-        <div class="dashboard-groups" id="dashboardDesignationGroups"></div>
-        <div class="table-container"><table><thead><tr><th>Worker</th><th>ID</th><th>Designation</th><th>Department</th><th>Hours</th><th>OT</th><th>State</th></tr></thead><tbody id="dashboardAttendance"></tbody></table></div>
+        <div class="section-header"><div><h2>Today's Workforce</h2><small class="muted">Workers currently deployed — click the shift buttons above to filter</small></div><div class="controls">
+            <input type="search" id="dashboardWorkerSearch" placeholder="Search name, ID, client..." autocomplete="off">
+            <select id="dashboardDesignationFilter" onchange="renderFuturisticDashboard()"><option value="all">All designations</option></select>
+            <select id="dashboardDepartmentFilter" onchange="renderFuturisticDashboard()"><option value="all">All departments</option></select>
+            <select id="dashboardClientFilter" onchange="renderFuturisticDashboard()"><option value="all">All clients</option></select>
+            <button class="primary" onclick="showPage('attendance')">Record Attendance</button>
+        </div></div>
+        <div class="table-container"><table><thead><tr><th>Worker</th><th>ID</th><th>Client / Site</th><th>Shift</th><th>Designation</th><th>Department</th><th>Hours</th><th>OT</th><th>Status</th></tr></thead><tbody id="dashboardAttendance"></tbody></table></div>
         <div class="lf-pager" id="dashboardAttendancePager"></div>
     </div>
-    <div class="section">
-        <div class="section-header"><h2>Recent Labour Requests</h2><button class="secondary" onclick="showPage('requests')">View Requests</button></div>
-        <div class="table-container"><table><thead><tr><th>Request</th><th>Client</th><th>Department</th><th>Workers</th><th>Start</th><th>Status</th></tr></thead><tbody id="dashboardRequestsTable"></tbody></table></div>
+    <!-- Today's Activities: pending requests + quick stats side by side -->
+    <div class="dash-activities" id="dashActivities">
+        <div class="dash-activities-left">
+            <div class="section-header"><h3>Pending Requests</h3><button class="secondary" onclick="showPage('requests')">Manage All</button></div>
+            <div class="table-container"><table><thead><tr><th>Request</th><th>Client</th><th>Dept</th><th>Needed</th><th>Start</th><th>Status</th></tr></thead><tbody id="dashboardRequestsTable"></tbody></table></div>
+        </div>
+        <div class="dash-activities-right">
+            <div class="section-header"><h3>Quick Stats</h3></div>
+            <div class="dash-quick-stats" id="dashQuickStats"></div>
+        </div>
     </div>
 </section>
 
@@ -121,7 +148,11 @@
 
 <section id="jts-history" class="page">
 <div class="section">
-    <div class="section-header"><h2>Worker History & Disputes</h2><div class="controls"><select id="jtsHistoryWorker" onchange="renderJtsHistory()"></select></div></div>
+    <div class="section-header"><div><h2>Worker History & Disputes</h2><small class="muted">Search a worker by name or ID to view their attendance history.</small></div></div>
+    <div class="jts-history-picker" id="jtsHistoryPicker">
+        <input type="search" id="jtsHistorySearch" placeholder="Search worker name or ID..." autocomplete="off" aria-label="Search for a worker">
+        <div class="jts-history-matches" id="jtsHistoryMatches"></div>
+    </div>
     <div class="jts-rollup" id="jtsRollup"></div>
     <div class="table-container"><table><thead><tr><th>Date</th><th>Worked</th><th>Hours</th><th>OT</th><th>Verification</th><th>Dispute</th></tr></thead><tbody id="jtsHistoryTable"></tbody></table></div>
     <div class="lf-pager" id="jtsHistoryPager"></div>
@@ -214,8 +245,15 @@
 <div class="section">
   <div class="section-header">
     <div><h2>Users & Access</h2><small class="muted">Create accounts, assign roles, promote, demote and control access.</small></div>
-    <div class="controls"><input type="search" id="userSearch" placeholder="Search user..." autocomplete="off"><select id="userRoleFilter" onchange="renderUsers()"><option value="all">All Roles</option></select><button class="primary" onclick="openUserModal()">+ Create User</button></div>
+    <div class="controls">
+      <input type="search" id="userSearch" placeholder="Search user..." autocomplete="off">
+      <select id="userRoleFilter" onchange="if(lfUserReady)renderUsers()"><option value="all">All Roles</option></select>
+      <button class="secondary" onclick="initUsers()" title="Refresh users data">&#8635; Refresh</button>
+      <button class="primary" onclick="openUserModal()">+ Create User</button>
+    </div>
   </div>
+  <!-- Role Permissions Overview — always visible so admins can see what each role can do -->
+  <div id="rolesOverview" class="roles-overview" style="padding:16px 20px;border-bottom:1px solid var(--line)"></div>
   <div class="cards" id="userSummaryCards"></div>
   <div class="table-container"><table><thead><tr><th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Permissions</th><th>Updated</th><th>Actions</th></tr></thead><tbody id="usersTable"></tbody></table></div>
   <div class="lf-pager" id="usersPager"></div>
@@ -296,7 +334,7 @@
 <script src="data.js"></script>
 <script src="app.js"></script>
 <script src="advanced.js"></script>
-<script src="supabase.js?v=20260829100000"></script>
+<script src="supabase.js?v=20260830000001"></script>
 <script src="users.js"></script>
 </body>
 </html>

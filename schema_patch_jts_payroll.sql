@@ -253,33 +253,36 @@ alter table public.bankfile_exports enable row level security;
 alter table public.bankfile_lines enable row level security;
 
 -- Public worker list is intentionally read-only and excludes rates
-create policy if not exists "workers_public select" 
-on public.workers_public
-for select to authenticated
-using (true);
+-- workers_public is a VIEW; PostgreSQL does not support RLS on views.
+-- The view's SELECT grant (line 225) is sufficient.
 
-create policy if not exists "workers admin read rates" 
+drop policy if exists "workers admin read rates" on public.workers;
+create policy "workers admin read rates"
 on public.workers
 for select to authenticated
 using (public.has_permission('workers.view_rates') or public.has_permission('rates.manage'));
 
-create policy if not exists "workers admin write rates" 
+drop policy if exists "workers admin write rates" on public.workers;
+create policy "workers admin write rates"
 on public.workers
 for insert to authenticated
 with check (public.has_permission('workers.view_rates') or public.has_permission('rates.manage'));
 
-create policy if not exists "workers admin update rates" 
+drop policy if exists "workers admin update rates" on public.workers;
+create policy "workers admin update rates"
 on public.workers
 for update to authenticated
 using (public.has_permission('workers.view_rates') or public.has_permission('rates.manage'))
 with check (public.has_permission('workers.view_rates') or public.has_permission('rates.manage'));
 
-create policy if not exists "workers admin delete rates" 
+drop policy if exists "workers admin delete rates" on public.workers;
+create policy "workers admin delete rates"
 on public.workers
 for delete to authenticated
 using (public.has_permission('workers.view_rates') or public.has_permission('rates.manage'));
 
-create policy if not exists "attendance capture or approve" 
+drop policy if exists "attendance capture or approve" on public.attendance;
+create policy "attendance capture or approve"
 on public.attendance
 for select to authenticated
 using (
@@ -287,12 +290,14 @@ using (
   or public.has_permission('attendance.approve')
 );
 
-create policy if not exists "attendance insert capture" 
+drop policy if exists "attendance insert capture" on public.attendance;
+create policy "attendance insert capture"
 on public.attendance
 for insert to authenticated
 with check (public.has_permission('attendance.capture'));
 
-create policy if not exists "attendance update capture or approve" 
+drop policy if exists "attendance update capture or approve" on public.attendance;
+create policy "attendance update capture or approve"
 on public.attendance
 for update to authenticated
 using (
@@ -304,7 +309,8 @@ with check (
   or public.has_permission('attendance.approve')
 );
 
-create policy if not exists "corrections manage" 
+drop policy if exists "corrections manage" on public.corrections;
+create policy "corrections manage"
 on public.corrections
 for all to authenticated
 using (
@@ -314,7 +320,8 @@ with check (
   public.has_permission('corrections.manage')
 );
 
-create policy if not exists "disputes manage" 
+drop policy if exists "disputes manage" on public.disputes;
+create policy "disputes manage"
 on public.disputes
 for all to authenticated
 using (
@@ -324,7 +331,8 @@ with check (
   public.has_permission('disputes.manage')
 );
 
-create policy if not exists "deductions manage" 
+drop policy if exists "deductions manage" on public.deductions;
+create policy "deductions manage"
 on public.deductions
 for all to authenticated
 using (
@@ -336,7 +344,8 @@ with check (
   or public.has_permission('payroll.calculate')
 );
 
-create policy if not exists "payroll periods manage" 
+drop policy if exists "payroll periods manage" on public.payroll_periods;
+create policy "payroll periods manage"
 on public.payroll_periods
 for all to authenticated
 using (
@@ -348,7 +357,8 @@ with check (
   or public.has_permission('payroll.approve')
 );
 
-create policy if not exists "payroll lines manage" 
+drop policy if exists "payroll lines manage" on public.payroll_lines;
+create policy "payroll lines manage"
 on public.payroll_lines
 for all to authenticated
 using (
@@ -360,13 +370,15 @@ with check (
   or public.has_permission('payroll.approve')
 );
 
-create policy if not exists "bankfile exports manage" 
+drop policy if exists "bankfile exports manage" on public.bankfile_exports;
+create policy "bankfile exports manage"
 on public.bankfile_exports
 for all to authenticated
 using (public.has_permission('bankfile.generate'))
 with check (public.has_permission('bankfile.generate'));
 
-create policy if not exists "bankfile lines manage" 
+drop policy if exists "bankfile lines manage" on public.bankfile_lines;
+create policy "bankfile lines manage"
 on public.bankfile_lines
 for all to authenticated
 using (public.has_permission('bankfile.generate'))

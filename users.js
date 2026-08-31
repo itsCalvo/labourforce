@@ -104,9 +104,15 @@ function renderUsers(){
   lfRenderPager('usersPager','users','users');
 }
 
-function openUserModal(){
+async function openUserModal(){
   ensureModal('userModal');
   if(!lfCanManageUsers()){showToast('You do not have permission to manage users.');return;}
+  /* Ensure the data layer is hydrated so the role <select> is populated
+     before the user sees an empty dropdown. */
+  if(!lfUserReady){
+    const ok=await loadUserAccessData();
+    if(!ok){showToast('Could not load roles yet. Please retry.');return;}
+  }
   document.getElementById('editingUserId').value='';
   document.getElementById('userModalTitle').textContent='Create Labour Force User';
   document.getElementById('userFullName').value='';
@@ -115,17 +121,27 @@ function openUserModal(){
   document.getElementById('userPassword').value='';
   document.getElementById('userPasswordGroup').style.display='block';
   document.getElementById('userActive').value='true';
-  const role=document.getElementById('userRole'); if(role.options.length)role.selectedIndex=0;
+  /* Populate the role select NOW that we know we have roles loaded. */
+  renderUserRoleOptions();
+  const role=document.getElementById('userRole');
+  if(role&&role.options.length){role.selectedIndex=0;}
   document.getElementById('saveUserBtn').textContent='Create User';
-  document.getElementById('userWarning').textContent='';
+  document.getElementById('userWarning').textContent='New users receive a temporary password. They can sign in immediately and change it later.';
   renderUserPermissionPreview();
   document.getElementById('userModal').classList.add('show');
 }
 
-function editUserAccount(id){
+async function editUserAccount(id){
   ensureModal('userModal');
+  if(!lfUserReady){
+    const ok=await loadUserAccessData();
+    if(!ok){showToast('Could not load users yet. Please retry.');return;}
+  }
   const u=lfUsers.find(x=>x.id===id); if(!u)return;
   if(u.id===labourForceSession?.user?.id){showToast('You cannot change your own role or status here.');return;}
+  /* Repopulate the role select to be safe in case the modal was opened in a
+     different page state and the data is stale. */
+  renderUserRoleOptions();
   document.getElementById('editingUserId').value=u.id;
   document.getElementById('userModalTitle').textContent='Manage User Access';
   document.getElementById('userFullName').value=u.full_name||'';
@@ -179,8 +195,58 @@ async function saveUserAccount(){
 
 async function initUsers(){
   if(!labourForceSession||!labourForceSupabase)return;
+  /* Show a lightweight skeleton while the data layer hydrates so the page
+     never appears empty or half-populated. */
+  renderUsersLoadingState();
   const ok=await loadUserAccessData();
-  if(ok&&lfCurrentPage==='users')renderUsers();
+  if(ok){
+    renderRolesOverview();
+    if(lfCurrentPage==='users')renderUsers();
+  }else if(lfCurrentPage==='users'){
+    renderUsersErrorState();
+  }
+}
+
+function renderUsersLoadingState(){
+  const table=document.getElementById('usersTable');
+  if(table&&!table.innerHTML.trim()){
+    table.innerHTML='<tr><td colspan="7"><div class="empty"><div class="lf-skel" style="height:14px;width:60%;margin:6px auto"></div><div class="lf-skel" style="height:14px;width:45%;margin:6px auto"></div><div class="lf-skel" style="height:14px;width:55%;margin:6px auto"></div></div></td></tr>';
+  }
+  const cards=document.getElementById('userSummaryCards');
+  if(cards&&!cards.innerHTML.trim()){
+    cards.innerHTML='<div class="card"><div class="card-label">Total Users</div><div class="card-value lf-skel" style="height:30px;width:40px"></div><div class="card-sub">Loading…</div></div><div class="card"><div class="card-label">Active</div><div class="card-value lf-skel" style="height:30px;width:40px"></div><div class="card-sub">Loading…</div></div><div class="card"><div class="card-label">Inactive</div><div class="card-value lf-skel" style="height:30px;width:40px"></div><div class="card-sub">Loading…</div></div>';
+  }
+  const rolesBox=document.getElementById('rolesOverview');
+  if(rolesBox&&!rolesBox.innerHTML.trim()){
+    rolesBox.innerHTML='<div class="lf-skel" style="height:18px;width:50%;margin:8px 0"></div><div class="lf-skel" style="height:18px;width:60%;margin:8px 0"></div><div class="lf-skel" style="height:18px;width:45%;margin:8px 0"></div>';
+  }
+}
+
+function renderUsersErrorState(){
+  const table=document.getElementById('usersTable');
+  if(table)table.innerHTML='<tr><td colspan="7"><div class="empty">Could not load users. <button class="secondary" style="margin-left:10px" onclick="initUsers()">Retry</button></div></td></tr>';
+  const cards=document.getElementById('userSummaryCards');
+  if(cards)cards.innerHTML='<div class="card"><div class="card-label">Total Users</div><div class="card-value">—</div><div class="card-sub">Unable to load</div></div><div class="card"><div class="card-label">Active</div><div class="card-value">—</div><div class="card-sub">Unable to load</div></div><div class="card"><div class="card-label">Inactive</div><div class="card-value">—</div><div class="card-sub">Unable to load</div></div>';
+  const rolesBox=document.getElementById('rolesOverview');
+  if(rolesBox)rolesBox.innerHTML='<div class="empty">Could not load roles. <button class="secondary" style="margin-left:10px" onclick="initUsers()">Retry</button></div>';
+}
+
+function renderRolesOverview(){
+  const box=document.getElementById('rolesOverview');
+  if(!box)return;
+  if(!lfRoles||!lfRoles.length){
+    box.innerHTML='<div class="empty">No roles configured yet.</div>';
+    return;
+  }
+  const visibleRoles=lfRoles.filter(r=>lfCurrentRoleName()==='super_admin'||r.name!=='super_admin');
+  const userCountByRole={};
+  lfUsers.forEach(u=>{if(u.role_id)userCountByRole[u.role_id]=(userCountByRole[u.role_id]||0)+1;});
+  box.innerHTML=visibleRoles.map(r=>{
+    const perms=lfPermissionsByRole[r.id]||[];
+    const count=userCountByRole[r.id]||0;
+    const permChips=perms.length?perms.slice(0,8).map(p=>`<span class="permission-chip">${esc(p.code)}</span>`).join('')+(perms.length>8?`<span class="permission-chip muted-chip">+${perms.length-8} more</span>`:''):'<span class="muted" style="font-size:12px">No permissions assigned</span>';
+    return `<div class="role-card" data-role-id="${esc(r.id)}"><div class="role-card-head"><div><span class="role-pill">${esc(lfRoleLabel(r.name))}</span> <small class="muted">${count} user${count===1?'':'s'}</small></div><strong>${perms.length} permission${perms.length===1?'':'s'}</strong></div><div class="permission-grid" style="margin-top:8px">${permChips}</div></div>`;
+  }).join('')||'<div class="empty">No roles available.</div>';
 }
 
 window.renderUsers=renderUsers;
@@ -188,7 +254,8 @@ window.openUserModal=openUserModal;
 window.editUserAccount=editUserAccount;
 window.saveUserAccount=saveUserAccount;
 window.initUsers=initUsers;
+window.renderRolesOverview=renderRolesOverview;
 window.addEventListener('labourforce:ready',initUsers);
 /* Fallback timer kept for robustness; single-flight prevents double loads. */
 setTimeout(()=>{if(labourForceSession)initUsers();},1200);
-LF_PAGER_RERENDER.users=()=>renderUsers();
+LF_PAGER_RERENDER.users=()=>{if(lfUserReady&&typeof renderUsers==='function')renderUsers();};
