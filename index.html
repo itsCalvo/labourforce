@@ -1,10 +1,11 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Labour Force</title>
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="stage_approval.css">
 </head>
 <body>
 <div class="app">
@@ -53,6 +54,7 @@
                 <button onclick="showPage('payroll', this)"><span class="nav-icon">💰</span>Payroll</button>
                 <button onclick="showPage('users', this)" data-permission="users.manage"><span class="nav-icon">🛡️</span>Users & Access</button>
                 <button onclick="showPage('audit', this)"><span class="nav-icon">🧾</span>Audit Trail</button>
+                <button onclick="showPage('stage-approval', this)"><span class="nav-icon">🔀</span>Stage Approval</button>
             </div>
         </div>
     </nav>
@@ -264,6 +266,33 @@
 <div class="section"><div class="section-header"><h2>Reports</h2><button class="primary" onclick="exportAttendance()">Export Attendance CSV</button></div><div class="inner-padding"><div class="cards"><div class="card"><div class="card-label">Active Workers</div><div class="card-value" id="reportWorkers">0</div></div><div class="card"><div class="card-label">Clients</div><div class="card-value" id="reportClients">0</div></div><div class="card"><div class="card-label">Departments</div><div class="card-value" id="reportDepartments">0</div></div><div class="card"><div class="card-label">Today's Attendance</div><div class="card-value" id="reportAttendance">Pending</div></div></div></div></div>
 </section>
 
+
+
+<section id="stage-approval" class="page">
+<div class="section">
+    <div class="section-header">
+        <h2>Stage Approval Pipeline</h2>
+        <div class="controls">
+            <label>Date <input type="date" id="stageApprovalDate" onchange="loadStageApprovalData()"></label>
+            <label>Batch <select id="stageApprovalBatch" onchange="loadStageApprovalData()"><option value="">All batches</option></select></label>
+            <button class="primary" onclick="loadStageApprovalData()">Refresh</button>
+        </div>
+    </div>
+    <div class="inner-padding" id="stageApprovalSummary"></div>
+    <div class="inner-padding" id="pipelineFlow"></div>
+    <div id="stageApprovalBoard" class="inner-padding"></div>
+</div>
+<div class="section">
+    <div class="section-header">
+        <h2>Workflow Audit Timeline</h2>
+        <small class="muted">Event-driven log of all approval actions</small>
+    </div>
+    <div class="inner-padding">
+        <div id="workflowTimeline" class="workflow-timeline"></div>
+    </div>
+</div>
+</section>
+
 </div></main></div>
 
 <!-- ================= LAZY MODAL TEMPLATES =================
@@ -271,36 +300,36 @@
      render them, cost zero DOM/CSS/layout until first opened.
      app.js instantiates a template the first time its modal opens. -->
 <template id="tpl-workerModal"><!-- Worker modal -->
-<div class="modal-overlay" id="workerModal"><div class="modal"><div class="modal-header"><h2 id="workerModalTitle">Add Worker</h2><button class="close-btn" onclick="closeModal('workerModal')">×</button></div><div class="modal-body"><input type="hidden" id="editingWorkerId"><div class="form-group"><label>Employee Number</label><input id="workerNo" readonly class="readonly"><small>Automatically generated.</small></div><div class="form-grid"><div class="form-group"><label>Full Name</label><input id="workerName" placeholder="Worker name"></div><div class="form-group"><label>ID Number / National ID</label><input id="workerIdNumber" placeholder="e.g. 12345678"></div></div><div class="form-grid"><div class="form-group"><label>Department</label><select id="workerDepartment"></select></div><div class="form-group"><label>Designation</label><input id="workerDesignation" placeholder="Operator / Loader / Supervisor"></div></div><div class="form-grid"><div class="form-group"><label>Classification</label><select id="workerClassification"><option>Skilled</option><option>Unskilled</option><option>Supervisor</option></select></div><div class="form-group"><label>Phone</label><input id="workerPhone" placeholder="Optional"></div></div><div class="form-grid"><div class="form-group"><label>Daily Rate (KSh)</label><input type="number" id="workerRate" min="0"></div><div class="form-group"><label>OT Rate / Hour (KSh)</label><input type="number" id="workerOtRate" min="0"></div></div><div class="form-group"><label>Date Joined</label><input type="date" id="workerJoinDate"></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('workerModal')">Cancel</button><button class="primary" onclick="saveWorker()">Save Worker</button></div></div></div>
+<div class="modal-overlay" id="workerModal"><div class="modal"><div class="modal-header"><h2 id="workerModalTitle">Add Worker</h2><button class="close-btn" onclick="closeModal('workerModal')">’</button></div><div class="modal-body"><input type="hidden" id="editingWorkerId"><div class="form-group"><label>Employee Number</label><input id="workerNo" readonly class="readonly"><small>Automatically generated.</small></div><div class="form-grid"><div class="form-group"><label>Full Name</label><input id="workerName" placeholder="Worker name"></div><div class="form-group"><label>ID Number / National ID</label><input id="workerIdNumber" placeholder="e.g. 12345678"></div></div><div class="form-grid"><div class="form-group"><label>Department</label><select id="workerDepartment"></select></div><div class="form-group"><label>Designation</label><input id="workerDesignation" placeholder="Operator / Loader / Supervisor"></div></div><div class="form-grid"><div class="form-group"><label>Classification</label><select id="workerClassification"><option>Skilled</option><option>Unskilled</option><option>Supervisor</option></select></div><div class="form-group"><label>Phone</label><input id="workerPhone" placeholder="Optional"></div></div><div class="form-grid"><div class="form-group"><label>Daily Rate (KSh)</label><input type="number" id="workerRate" min="0"></div><div class="form-group"><label>OT Rate / Hour (KSh)</label><input type="number" id="workerOtRate" min="0"></div></div><div class="form-group"><label>Date Joined</label><input type="date" id="workerJoinDate"></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('workerModal')">Cancel</button><button class="primary" onclick="saveWorker()">Save Worker</button></div></div></div>
 </template>
 
 <template id="tpl-departmentModal"><!-- Department modal -->
-<div class="modal-overlay" id="departmentModal"><div class="modal"><div class="modal-header"><h2 id="departmentModalTitle">Add Department</h2><button class="close-btn" onclick="closeModal('departmentModal')">×</button></div><div class="modal-body"><input type="hidden" id="departmentOriginalName"><div class="form-group"><label>Department Name</label><input id="departmentName" placeholder="e.g. Logistics"></div><div class="form-group"><label>Parent Department</label><select id="departmentParent"></select></div><div class="form-grid"><div class="form-group"><label>Default daily wage</label><input id="departmentRate" type="number" min="0" step="0.01"></div><div class="form-group"><label>Default OT wage/hour</label><input id="departmentOtRate" type="number" min="0" step="0.01"></div></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('departmentModal')">Cancel</button><button class="primary" onclick="saveDepartment()">Save Department</button></div></div></div>
+<div class="modal-overlay" id="departmentModal"><div class="modal"><div class="modal-header"><h2 id="departmentModalTitle">Add Department</h2><button class="close-btn" onclick="closeModal('departmentModal')">’</button></div><div class="modal-body"><input type="hidden" id="departmentOriginalName"><div class="form-group"><label>Department Name</label><input id="departmentName" placeholder="e.g. Logistics"></div><div class="form-group"><label>Parent Department</label><select id="departmentParent"></select></div><div class="form-grid"><div class="form-group"><label>Default daily wage</label><input id="departmentRate" type="number" min="0" step="0.01"></div><div class="form-group"><label>Default OT wage/hour</label><input id="departmentOtRate" type="number" min="0" step="0.01"></div></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('departmentModal')">Cancel</button><button class="primary" onclick="saveDepartment()">Save Department</button></div></div></div>
 </template>
 
 <template id="tpl-clientModal"><!-- Client modal -->
-<div class="modal-overlay" id="clientModal"><div class="modal"><div class="modal-header"><h2 id="clientModalTitle">Add Client</h2><button class="close-btn" onclick="closeModal('clientModal')">×</button></div><div class="modal-body"><input type="hidden" id="editingClientId"><div class="form-group"><label>Company Name</label><input id="clientName" placeholder="Mother company / client"></div><div class="form-grid"><div class="form-group"><label>Contact Person</label><input id="clientContact" placeholder="Contact name"></div><div class="form-group"><label>Phone</label><input id="clientPhone" placeholder="Phone number"></div></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('clientModal')">Cancel</button><button class="primary" onclick="saveClient()">Save Client</button></div></div></div>
+<div class="modal-overlay" id="clientModal"><div class="modal"><div class="modal-header"><h2 id="clientModalTitle">Add Client</h2><button class="close-btn" onclick="closeModal('clientModal')">’</button></div><div class="modal-body"><input type="hidden" id="editingClientId"><div class="form-group"><label>Company Name</label><input id="clientName" placeholder="Mother company / client"></div><div class="form-grid"><div class="form-group"><label>Contact Person</label><input id="clientContact" placeholder="Contact name"></div><div class="form-group"><label>Phone</label><input id="clientPhone" placeholder="Phone number"></div></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('clientModal')">Cancel</button><button class="primary" onclick="saveClient()">Save Client</button></div></div></div>
 </template>
 
 <template id="tpl-requestModal"><!-- Request modal -->
-<div class="modal-overlay" id="requestModal"><div class="modal"><div class="modal-header"><h2 id="requestModalTitle">New Labour Request</h2><button class="close-btn" onclick="closeModal('requestModal')">×</button></div><div class="modal-body"><input type="hidden" id="editingRequestId"><div class="form-grid"><div class="form-group"><label>Client / Mother Company</label><select id="requestClient"></select></div><div class="form-group"><label>Department</label><select id="requestDepartment"></select></div></div><div class="form-grid"><div class="form-group"><label>Workers Required</label><input type="number" id="requestWorkers" min="1" value="1"></div><div class="form-group"><label>Classification</label><select id="requestClassification"><option>Skilled</option><option>Unskilled</option><option>Supervisor</option><option>Any</option></select></div></div><div class="form-grid"><div class="form-group"><label>Start Date</label><input type="date" id="requestStartDate"></div><div class="form-group"><label>Duration (days)</label><input type="number" id="requestDuration" min="1" value="1"></div></div><div class="form-group"><label>Shift</label><select id="requestShift"><option>Day</option><option>Night</option><option>Rotating</option></select></div><div class="form-group"><label>Reason / Notes</label><textarea id="requestNotes" rows="3" placeholder="Optional request details"></textarea></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('requestModal')">Cancel</button><button class="primary" onclick="saveRequest()">Save Request</button></div></div></div>
+<div class="modal-overlay" id="requestModal"><div class="modal"><div class="modal-header"><h2 id="requestModalTitle">New Labour Request</h2><button class="close-btn" onclick="closeModal('requestModal')">’</button></div><div class="modal-body"><input type="hidden" id="editingRequestId"><div class="form-grid"><div class="form-group"><label>Client / Mother Company</label><select id="requestClient"></select></div><div class="form-group"><label>Department</label><select id="requestDepartment"></select></div></div><div class="form-grid"><div class="form-group"><label>Workers Required</label><input type="number" id="requestWorkers" min="1" value="1"></div><div class="form-group"><label>Classification</label><select id="requestClassification"><option>Skilled</option><option>Unskilled</option><option>Supervisor</option><option>Any</option></select></div></div><div class="form-grid"><div class="form-group"><label>Start Date</label><input type="date" id="requestStartDate"></div><div class="form-group"><label>Duration (days)</label><input type="number" id="requestDuration" min="1" value="1"></div></div><div class="form-group"><label>Shift</label><select id="requestShift"><option>Day</option><option>Night</option><option>Rotating</option></select></div><div class="form-group"><label>Reason / Notes</label><textarea id="requestNotes" rows="3" placeholder="Optional request details"></textarea></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('requestModal')">Cancel</button><button class="primary" onclick="saveRequest()">Save Request</button></div></div></div>
 </template>
 
 <template id="tpl-allocationModal"><!-- Allocation modal -->
-<div class="modal-overlay" id="allocationModal"><div class="modal wide"><div class="modal-header"><h2>Allocate Workers</h2><button class="close-btn" onclick="closeModal('allocationModal')">×</button></div><div class="modal-body"><input type="hidden" id="allocationRequestId"><div id="allocationSummary" class="allocation-summary"></div><div class="worker-picker" id="workerPicker"></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('allocationModal')">Cancel</button><button class="primary" onclick="saveAllocation()">Allocate Selected Workers</button></div></div></div>
+<div class="modal-overlay" id="allocationModal"><div class="modal wide"><div class="modal-header"><h2>Allocate Workers</h2><button class="close-btn" onclick="closeModal('allocationModal')">’</button></div><div class="modal-body"><input type="hidden" id="allocationRequestId"><div id="allocationSummary" class="allocation-summary"></div><div class="worker-picker" id="workerPicker"></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('allocationModal')">Cancel</button><button class="primary" onclick="saveAllocation()">Allocate Selected Workers</button></div></div></div>
 </template>
 
 <template id="tpl-deploymentModal"><!-- Direct deployment modal -->
-<div class="modal-overlay" id="deploymentModal"><div class="modal"><div class="modal-header"><h2>Deploy Worker</h2><button class="close-btn" onclick="closeModal('deploymentModal')">×</button></div><div class="modal-body"><input type="hidden" id="deploymentWorkerId"><div class="form-group"><label>Worker</label><input id="deploymentWorkerName" readonly class="readonly"></div><div class="form-group"><label>Client / Mother Company</label><select id="deploymentClient"></select></div><div class="form-group"><label>Department</label><select id="deploymentDepartment"></select></div><div class="form-grid"><div class="form-group"><label>Start Date</label><input type="date" id="deploymentStartDate"></div><div class="form-group"><label>Assignment</label><input id="deploymentAssignment" placeholder="e.g. Production Line A"></div></div><div class="form-group"><label>Labour Request</label><select id="deploymentRequest"><option value="">Direct deployment — no request</option></select></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('deploymentModal')">Cancel</button><button class="primary" onclick="saveDeployment()">Save Deployment</button></div></div></div>
+<div class="modal-overlay" id="deploymentModal"><div class="modal"><div class="modal-header"><h2>Deploy Worker</h2><button class="close-btn" onclick="closeModal('deploymentModal')">’</button></div><div class="modal-body"><input type="hidden" id="deploymentWorkerId"><div class="form-group"><label>Worker</label><input id="deploymentWorkerName" readonly class="readonly"></div><div class="form-group"><label>Client / Mother Company</label><select id="deploymentClient"></select></div><div class="form-group"><label>Department</label><select id="deploymentDepartment"></select></div><div class="form-grid"><div class="form-group"><label>Start Date</label><input type="date" id="deploymentStartDate"></div><div class="form-group"><label>Assignment</label><input id="deploymentAssignment" placeholder="e.g. Production Line A"></div></div><div class="form-group"><label>Labour Request</label><select id="deploymentRequest"><option value="">Direct deployment ’ no request</option></select></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('deploymentModal')">Cancel</button><button class="primary" onclick="saveDeployment()">Save Deployment</button></div></div></div>
 </template>
 
 <template id="tpl-endDeploymentModal">
-<div class="modal-overlay" id="endDeploymentModal"><div class="modal"><div class="modal-header"><h2>End Deployment</h2><button class="close-btn" onclick="closeModal('endDeploymentModal')">×</button></div><div class="modal-body"><input type="hidden" id="endingDeploymentId"><div class="form-group"><label>End Date</label><input type="date" id="deploymentEndDate"></div><div class="form-group"><label>Reason</label><input id="deploymentEndReason" placeholder="Completed assignment, transfer, etc."></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('endDeploymentModal')">Cancel</button><button class="primary" onclick="endDeployment()">End Deployment</button></div></div></div>
+<div class="modal-overlay" id="endDeploymentModal"><div class="modal"><div class="modal-header"><h2>End Deployment</h2><button class="close-btn" onclick="closeModal('endDeploymentModal')">’</button></div><div class="modal-body"><input type="hidden" id="endingDeploymentId"><div class="form-group"><label>End Date</label><input type="date" id="deploymentEndDate"></div><div class="form-group"><label>Reason</label><input id="deploymentEndReason" placeholder="Completed assignment, transfer, etc."></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('endDeploymentModal')">Cancel</button><button class="primary" onclick="endDeployment()">End Deployment</button></div></div></div>
 </template>
 
 <template id="tpl-userModal">
 <div class="modal-overlay" id="userModal"><div class="modal wide">
-<div class="modal-header"><h2 id="userModalTitle">Create Labour Force User</h2><button class="close-btn" onclick="closeModal('userModal')">×</button></div>
+<div class="modal-header"><h2 id="userModalTitle">Create Labour Force User</h2><button class="close-btn" onclick="closeModal('userModal')">’</button></div>
 <div class="modal-body">
 <input type="hidden" id="editingUserId">
 <div class="form-grid"><div class="form-group"><label>Full Name</label><input id="userFullName" placeholder="e.g. Jane Wanjiku"></div><div class="form-group"><label>Email</label><input id="userEmail" type="email" placeholder="name@company.com"></div></div>
@@ -336,5 +365,8 @@
 <script src="advanced.js"></script>
 <script src="supabase.js?v=20260830000001"></script>
 <script src="users.js"></script>
+<script src="stage_approval_ui.js"></script>
+
+
 </body>
 </html>

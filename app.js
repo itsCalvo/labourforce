@@ -90,7 +90,7 @@ function getAttendance(date,id){const day=getDayRecord(date);if(!day.records[id]
 function ensureJtsRosterForDate(date){const active=workers.filter(w=>w.active);if(!active.length)return;active.forEach(w=>{const record=getAttendance(date,w.id);if(!record.status)record.status="pending";record.hours=Number(record.hours||0);record.overtime=Number(record.overtime||0);});}
 
 /* ---------- navigation: render on demand, unmount on leave ---------- */
-const LF_PAGE_TITLES={dashboard:'Executive Dashboard',requests:'Labour Requests',deployments:'Worker Deployments',availability:'Workforce Availability',exceptions:'Exception Centre',attendance:'Daily Attendance','jts':'JTS Daily Roll Call','jts-history':'JTS History & Disputes','jts-payroll':'JTS Payroll Review',approval:'Supervisor Approval',workers:'Workers',clients:'Clients / Mother Companies',departments:'Departments',payroll:'Payroll',users:'Users & Access',reports:'Reports',audit:'Audit Trail','worker-portal':'My Attendance',supervisor:'Supervisor Portal'};
+const LF_PAGE_TITLES={dashboard:'Executive Dashboard',requests:'Labour Requests',deployments:'Worker Deployments',availability:'Workforce Availability',exceptions:'Exception Centre',attendance:'Daily Attendance','jts':'JTS Daily Roll Call','jts-history':'JTS History & Disputes','jts-payroll':'JTS Payroll Review',approval:'Supervisor Approval',workers:'Workers',clients:'Clients / Mother Companies',departments:'Departments',payroll:'Payroll',users:'Users & Access',reports:'Reports',audit:'Audit Trail','worker-portal':'My Attendance',supervisor:'Supervisor Portal','stage-approval':'Stage Approval Pipeline'};
 const LF_PAGE_RENDER={
  dashboard:()=>renderDashboard(),
  requests:()=>renderRequests(),
@@ -110,7 +110,8 @@ const LF_PAGE_RENDER={
  reports:()=>renderReports(),
  audit:()=>renderAudit(),
  'worker-portal':()=>renderWorkerPortal(),
- supervisor:()=>renderSupervisorPortal()
+ supervisor:()=>renderSupervisorPortal(),
+ 'stage-approval':()=>{if(typeof initStageApproval==='function')initStageApproval();}
 };
 /* Heavy containers cleared when leaving a page so hidden pages cost nothing. */
 const LF_PAGE_CLEAR={
@@ -131,7 +132,8 @@ const LF_PAGE_CLEAR={
  availability:['availabilityCards','availabilityTable','availabilityPager'],
  exceptions:['exceptionCards','exceptionsTable'],
  audit:['auditTable','auditPager'],
- users:['userSummaryCards','usersTable','usersPager','rolesOverview']
+ users:['userSummaryCards','usersTable','usersPager','rolesOverview'],
+ 'stage-approval':['pipelineFlow','stageApprovalSummary','stageApprovalBoard','workflowTimeline']
 };
 let lfCurrentPage=null;
 function showPage(id,button){

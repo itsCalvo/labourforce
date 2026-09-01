@@ -174,7 +174,7 @@ function bindAuthGate(){
   if(!btn||btn.__lfBound)return;
   btn.__lfBound=true;
   const doLogin=async()=>{
-    const email=document.getElementById('gateEmail').value.trim();
+    const email=document.getElementById('gateEmail').value.trim().toLowerCase();
     const password=document.getElementById('gatePassword').value;
     const out=document.getElementById('gateError'); if(out)out.textContent='';
     if(!email||!password){if(out)out.textContent='Email and password are required.';return;}
@@ -535,6 +535,36 @@ async function hydrateAttendanceFromBackend(){
       const remoteId=map.worker?.[String(w.id)];
       if(remoteId) remoteByLocalWorker.set(String(remoteId), String(w.id));
     }
+    // Also map workers already in the local array by their database UUID
+    if(typeof workers!=='undefined' && Array.isArray(workers)){
+      workers.forEach(function(w){ if(w.id) remoteByLocalWorker.set(String(w.id), String(w.id)); });
+    }
+    // Collect worker IDs from attendance that are not in the local workers list
+    const newWorkerIds=[];
+    const seenNewWorkerIds=new Set();
+    for(const row of remoteRows){
+      if(!row.attendance_date || seenNewWorkerIds.has(String(row.worker_id))) continue;
+      seenNewWorkerIds.add(String(row.worker_id));
+      if(!remoteByLocalWorker.has(String(row.worker_id))){
+        newWorkerIds.push(row.worker_id);
+      }
+    }
+    // Fetch worker names for any attendance records that are not in the local workers array
+    const workerNameMap={};
+    if(newWorkerIds.length && labourForceSupabase){
+      try{
+        const wr=await labourForceSupabase.from('workers').select('id,full_name,name,employee_no,staff_no,department_id').in('id',newWorkerIds);
+        if(wr && wr.data && !wr.error){
+          wr.data.forEach(function(w){
+            workerNameMap[String(w.id)]={
+              name: w.full_name||w.name||'(no name)',
+              employeeNo: w.employee_no||w.staff_no||''
+            };
+            remoteByLocalWorker.set(String(w.id), String(w.id));
+          });
+        }
+      }catch(e){ console.warn('[Labour Force] could not fetch worker names for attendance:', e); }
+    }
 
     const fresh={};
     for(const row of remoteRows){
@@ -857,3 +887,83 @@ window.lfSaveAttendanceApproval=lfSaveAttendanceApproval;
 window.lfSyncFailCount=lfSyncFailCount;
 window.lfHasRatePermission=lfHasRatePermission;
 window.lfClearMissingTables=lfClearMissingTables;
+
+/* ============================================================
+   CROSS-TAB ATTENDANCE SYNC
+   Supervisors marking attendance on supervisor.html need their
+   changes to appear on the main dashboard. This polls the cloud
+   every 20 seconds (only when the tab is visible) and re-renders
+   the dashboard / attendance views so any supervisor submission
+   shows up automatically without a manual refresh.
+   ============================================================ */
+let lfCrossTabSyncTimer=null;
+let lfCrossTabSyncInFlight=false;
+let lfCrossTabLastHash='';
+async function lfCrossTabSyncTick(){
+  if(lfCrossTabSyncInFlight) return;
+  if(!labourForceSession) return;
+  if(document.hidden) return;  // don't waste cycles when the tab isn't visible
+  lfCrossTabSyncInFlight=true;
+  try{
+    // Only sync if we're online and a session exists
+    const cutoff=new Date(); cutoff.setDate(cutoff.getDate()-7);
+    const since=cutoff.toISOString().split('T')[0];
+    const res=await labourForceSupabase.from('attendance')
+      .select('attendance_date,worker_id,status,overtime_hours,time_in,time_out,submitted_at,remarks,supervisor_id')
+      .gte('attendance_date',since)
+      .order('attendance_date',{ascending:false})
+      .limit(500);
+    if(res.error){ return; }
+    const data=res.data||[];
+    // Build a cheap hash of the latest rows so we only re-render if something changed
+    const hash=data.length+':'+(data[0]?`${data[0].attendance_date}|${data[0].worker_id}|${data[0].status}`:'')+':'+(data[data.length-1]?`${data[data.length-1].attendance_date}|${data[data.length-1].worker_id}`:'');
+    if(hash===lfCrossTabLastHash) return;  // no change
+    lfCrossTabLastHash=hash;
+    // Pull the full hydration so local cache & re-render match what the supervisor just submitted
+    await hydrateAttendanceFromBackend();
+    // Re-render any visible views so the data appears immediately
+    if(typeof renderDashboard==='function'){ try{ renderDashboard(); }catch(_e){} }
+    if(typeof renderAttendance==='function'){ try{ renderAttendance(); }catch(_e){} }
+    if(typeof renderJtsAttendance==='function'){ try{ renderJtsAttendance(); }catch(_e){} }
+    console.log('[Labour Force] cross-tab attendance sync: pulled',data.length,'row(s) from cloud');
+  }catch(e){
+    console.warn('[Labour Force] cross-tab attendance sync failed:',e?.message||e);
+  }finally{
+    lfCrossTabSyncInFlight=false;
+  }
+}
+function lfStartCrossTabSync(){
+  if(lfCrossTabSyncTimer) return;
+  // Poll every 20s. Cheap when the tab is hidden (early-return).
+  lfCrossTabSyncTimer=setInterval(lfCrossTabSyncTick, 20000);
+  // Also sync once on visibility change (when the user comes back to the tab)
+  document.addEventListener('visibilitychange', function(){
+    if(!document.hidden && labourForceSession){
+      // Reset hash so we re-pull even if the timer would skip
+      lfCrossTabLastHash='';
+      lfCrossTabSyncTick();
+    }
+  });
+  // And once on window focus (catches the user returning from supervisor.html)
+  window.addEventListener('focus', function(){
+    if(labourForceSession){
+      lfCrossTabLastHash='';
+      lfCrossTabSyncTick();
+    }
+  });
+}
+// Start the cross-tab sync once a session is available. Watch the session
+// variable and start/stop the timer as the user signs in / out.
+function lfWatchSession(){
+  setInterval(function(){
+    if(labourForceSession && !lfCrossTabSyncTimer){
+      lfStartCrossTabSync();
+    } else if(!labourForceSession && lfCrossTabSyncTimer){
+      clearInterval(lfCrossTabSyncTimer);
+      lfCrossTabSyncTimer=null;
+      lfCrossTabLastHash='';
+    }
+  }, 1000);
+}
+lfWatchSession();
+window.lfCrossTabSyncTick=lfCrossTabSyncTick;

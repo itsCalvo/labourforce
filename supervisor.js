@@ -1,15 +1,22 @@
-﻿// ===== Supervisor Portal =====
+// ===== Supervisor Portal =====
 (function () {
   'use strict';
 
-  var supSession = null, supProfile = null, supWorkers = [], supAttendance = {};
+  var supSession = null, supProfile = null, supWorkers = [];
   var supSelectedDate = null, supDirty = false;
-  // Local cache: department_id → name. The workers table stores department_id (FK),
-  // not a name, so we resolve the name client-side once after sign-in. Safe to keep
-  // empty if the departments table is missing — we just display an empty department.
+
+  // BATCH MODEL: a batch corresponds to a worker designation
+  // (e.g. Operator, Loader, Driver, Supervisor). Each worker can only appear
+  // in ONE batch per day — their own designation. Batches are auto-derived
+  // from the workers table on load, so the supervisor just sees the designations
+  // present in today's deployed workforce.
+  // supBatches = { [designation]: { workers: {[workerId]: rec}, submittedAt, submitted } }
+  var supBatches = {};
+  var activeBatch = '';
+  // Worker map for fast lookup: workerId → worker object (includes designation)
+  var supWorkerMap = {};
+
   var supDepartments = {}; // { [departmentId]: name }
-  // Canonical attendance statuses matching the database CHECK constraint
-  // (attendance_status_check: pending,present,absent,late,half_day,excused,off_day,pending_verification,worked,approved)
   var validStatuses = ['pending','present','absent','late','half_day','excused','off_day','pending_verification','worked','approved'];
 
   function supInitClient() {
@@ -44,6 +51,7 @@
       employeeNo: row.employee_no || row.staff_no || row.employeeNumber || '',
       idNumber: row.id_number || row.national_id || row.nationalId || '',
       department: deptName,
+      designation: (row.designation && String(row.designation).trim()) || 'Undesignated',
       _active: row.active
     };
   }
@@ -57,6 +65,40 @@
       return String(a.name || '').localeCompare(String(b.name || ''));
     });
     return filtered;
+  }
+
+  // Rebuild the workerId → worker map from the current supWorkers array
+  function supBuildWorkerMap() {
+    supWorkerMap = {};
+    supWorkers.forEach(function (w) {
+      supWorkerMap[String(w.id)] = w;
+    });
+  }
+
+  // Recompute supBatches from the workers table: one batch per unique designation.
+  // Each worker is placed in their own designation's batch (mark is empty until
+  // the supervisor marks them). This is the source of truth for which batches
+  // exist — local-only custom batch names are dropped.
+  function supBuildBatchesFromDesignations() {
+    supBuildWorkerMap();
+    var seen = {};
+    supWorkers.forEach(function (w) {
+      var d = w.designation || 'Undesignated';
+      if (seen[d]) return;
+      seen[d] = true;
+      // Preserve any existing marks (e.g. submitted today) for this batch
+      var existing = supBatches[d];
+      supBatches[d] = existing || { workers: {}, submittedAt: null, submitted: false };
+    });
+    // Drop any batches whose designation no longer matches any worker
+    Object.keys(supBatches).forEach(function (name) {
+      if (!seen[name]) delete supBatches[name];
+    });
+    // Pick a sensible active batch
+    if (!activeBatch || !supBatches[activeBatch]) {
+      var keys = Object.keys(supBatches);
+      activeBatch = keys[0] || '';
+    }
   }
 
   function mapAttendanceRow(row) {
@@ -245,7 +287,7 @@
         if (debTimer) clearTimeout(debTimer);
         var v = searchInput.value.trim();
         if (v.length < 2) {
-          supWorkers = []; supRenderSearch();
+          supWorkers = []; supRenderTabs(); supRenderSearch();
           return;
         }
         debTimer = setTimeout(function () { supSearchWorkers(v); }, 350);
@@ -259,19 +301,19 @@
       ids.forEach(function (id) {
         var r = supRecord(id);
         if (r.status !== 'pending') return;
-        supAttendance[id] = { status: 'absent', hoursWorked: 0, overtimeHours: 0, remarks: '' };
+        activeAttendance()[id] = { status: 'absent', hoursWorked: 0, overtimeHours: 0, remarks: '' };
       });
       supDirty = true; supSaveLocalDraft();
-      supUpdateMetrics(); supRenderTable(); supRenderSearch();
+      supUpdateMetrics(); supRenderTabs(); supRenderTable(); supRenderSearch();
     });
 
     var cancelBtn = document.getElementById('supCancelSelected');
     if (cancelBtn) cancelBtn.addEventListener('click', function () {
       var ids = supSelectedIds();
       if (!ids.length) { supToast('Select workers first.', 'error'); return; }
-      ids.forEach(function (id) { delete supAttendance[id]; });
+      ids.forEach(function (id) { delete activeAttendance()[id]; });
       supDirty = true; supSaveLocalDraft();
-      supUpdateMetrics(); supRenderTable(); supRenderSearch();
+      supUpdateMetrics(); supRenderTabs(); supRenderTable(); supRenderSearch();
     });
 
     var editBtn = document.getElementById('supEditSelected');
@@ -291,6 +333,8 @@
 
     supAuthState();
     supLoadLocalDraft();
+    // Render the batch tabs bar once on page load
+    supRenderTabs();
   });
 
   // ---- Worker loading (on portal entry) ----
@@ -301,9 +345,11 @@
   function supLoadWorkersAndAttendance() {
     supWorkers = [];
     supLoadAssignedCount();
+    supLoadDesignations();
     supLoadAttendance();
   }
 
+  // Lightweight count for the "Expected" stat tile.
   function supLoadAssignedCount() {
     var client = supInitClient();
     if (!client) { supAssignedCount = 0; supUpdateMetrics(); return; }
@@ -313,6 +359,41 @@
         else supAssignedCount = result.count || 0;
         supUpdateMetrics();
       })['catch'](function (e) { console.warn('[Supervisor] workers count error:', e); supAssignedCount = 0; supUpdateMetrics(); });
+  }
+
+  // Load ALL active workers' id+designation so we can build the batch list.
+  // This is small (just two columns) and lets the supervisor see the
+  // designations present in their workforce before they search anyone.
+  function supLoadDesignations() {
+    var client = supInitClient();
+    if (!client) return;
+    client.from('workers').select('id,designation')
+      .then(function (result) {
+        if (result.error) { console.warn('[Supervisor] designations read failed:', result.error.message); return; }
+        var rows = (result.data || []).map(function (r) {
+          return { id: r.id, designation: (r.designation && String(r.designation).trim()) || 'Undesignated' };
+        });
+        // Build the batch list from these lightweight rows
+        var seen = {};
+        rows.forEach(function (r) {
+          if (seen[r.designation]) return;
+          seen[r.designation] = true;
+          var existing = supBatches[r.designation];
+          supBatches[r.designation] = existing || { workers: {}, submittedAt: null, submitted: false };
+        });
+        // Add to the worker map (with just id+designation; full worker data
+        // is added when the supervisor searches)
+        rows.forEach(function (r) { supWorkerMap[String(r.id)] = supWorkerMap[String(r.id)] || { id: r.id, designation: r.designation }; });
+        // Drop any batch whose designation is no longer present
+        Object.keys(supBatches).forEach(function (name) {
+          if (!seen[name] && name !== 'Undesignated') delete supBatches[name];
+        });
+        if (!activeBatch || !supBatches[activeBatch]) {
+          var keys = Object.keys(supBatches);
+          activeBatch = keys[0] || '';
+        }
+        supRenderTabs(); supUpdateMetrics();
+      })['catch'](function (e) { console.warn('[Supervisor] designations error:', e); });
   }
 
   // ---- Lazy worker search (server-side filtered) ----
@@ -337,6 +418,8 @@
     if (cached && (Date.now() - cached.ts) < supSearchCacheMs) {
       if (myToken !== supSearchToken) return;
       supWorkers = cached.rows;
+      // Re-merge designation info from cache into worker map
+      supWorkers.forEach(function (w) { supWorkerMap[String(w.id)] = w; });
       supRenderSearch();
       return;
     }
@@ -345,7 +428,7 @@
     // RLS on the `workers` table returns only rows the current profile may see.
     // Only request the columns we actually use to minimise payload.
     client.from('workers')
-      .select('id,employee_no,id_number,full_name,department_id,active')
+      .select('id,employee_no,id_number,full_name,department_id,designation,active')
       .or('full_name.ilike.' + ilike + ',employee_no.ilike.' + ilike + ',id_number.ilike.' + ilike)
       .limit(20)
       .then(function (result) {
@@ -354,6 +437,9 @@
         var rows = (result.data || []).map(mapWorkerRow);
         supSearchCache[cacheKey] = { rows: rows, ts: Date.now() };
         supWorkers = rows;
+        // Merge search results into the worker map so we know each worker's
+        // designation for batch routing.
+        rows.forEach(function (w) { supWorkerMap[String(w.id)] = w; });
         supRenderSearch();
       })['catch'](function (e) {
         if (myToken !== supSearchToken) return;
@@ -366,51 +452,197 @@
     if (!supSession) { supRenderSearch(); supRenderTable(); return; }
     var client = supInitClient();
     var today = supDate();
-    client.from('attendance').select('*').eq('attendance_date', today)
-      .then(function (result) {
-        if (result.error) { console.warn('[Supervisor] attendance read failed:', result.error.message); supAttendance = {}; }
-        else {
-          supAttendance = {};
-          (result.data || []).forEach(function (row) { var m = mapAttendanceRow(row); if (m.workerId != null) supAttendance[String(m.workerId)] = m; });
-        }
-        supUpdateMetrics(); supRenderSearch(); supRenderTable();
-      })['catch'](function (e) { console.error('[Supervisor] attendance error:', e); supAttendance = {}; supUpdateMetrics(); supRenderSearch(); supRenderTable(); });
+    // Progressive column sets so this works on old DBs without batch_name column
+    var colSets = [
+      'worker_id,attendance_date,status,hours_worked,overtime_hours,notes,batch_name',
+      'worker_id,attendance_date,status,hours_worked,overtime_hours,notes',
+      'worker_id,attendance_date,status,hours_worked,overtime_hours',
+      'worker_id,attendance_date,status'
+    ];
+    var idx = 0;
+    function tryNext() {
+      if (idx >= colSets.length) {
+        // No attendance rows found; build batches from current designations
+        supBuildBatchesFromDesignations();
+        supMergeLocalDraft();
+        supRenderTabs(); supRenderSearch(); supRenderTable(); supUpdateMetrics();
+        return;
+      }
+      client.from('attendance').select(colSets[idx++]).eq('attendance_date', today)
+        .then(function (result) {
+          if (result.error) {
+            if (result.error.code === '42703') return tryNext();
+            console.warn('[Supervisor] attendance read failed:', result.error.message);
+            return;
+          }
+          // Build batches from designations, then overlay cloud rows.
+          // Route each row to the worker's actual designation; fall back to
+          // batch_name column if the worker isn't in supWorkerMap.
+          supBatches = {};
+          (result.data || []).forEach(function (row) {
+            var m = mapAttendanceRow(row);
+            if (m.workerId == null) return;
+            var wid = String(m.workerId);
+            var worker = supWorkerMap[wid];
+            var batchName = (worker && worker.designation) ? worker.designation : (row.batch_name || 'Undesignated');
+            var b = ensureBatch(batchName);
+            b.workers[wid] = m;
+            b.submitted = true;
+          });
+          // Rebuild from designations so the batch list reflects the workforce,
+          // then re-apply submitted cloud rows.
+          var cloudRows = result.data || [];
+          supBuildBatchesFromDesignations();
+          cloudRows.forEach(function (row) {
+            var m = mapAttendanceRow(row);
+            if (m.workerId == null) return;
+            var wid = String(m.workerId);
+            var worker = supWorkerMap[wid];
+            var batchName = (worker && worker.designation) ? worker.designation : (row.batch_name || 'Undesignated');
+            var b = supBatches[batchName];
+            if (b) { b.workers[wid] = m; b.submitted = true; }
+          });
+          supMergeLocalDraft();
+          supRenderTabs(); supRenderSearch(); supRenderTable(); supUpdateMetrics();
+        })['catch'](function (e) {
+          console.error('[Supervisor] attendance error:', e);
+          supBuildBatchesFromDesignations();
+          supMergeLocalDraft();
+          supRenderTabs(); supRenderSearch(); supRenderTable(); supUpdateMetrics();
+        });
+    }
+    tryNext();
   }
 
-  // ---- Mutations ----
-  function supRecord(workerId) { return supAttendance[String(workerId)] || { status: 'pending' }; }
+  // Keep local unsubmitted marks on top of cloud data.
+  // Only accept local batches that match actual designations.
+  function supMergeLocalDraft() {
+    try {
+      var lastDate = localStorage.getItem('supDraft:lastDate');
+      if (!lastDate || lastDate !== supDate()) return;
+      var raw = localStorage.getItem('supDraft:' + lastDate);
+      if (!raw) return;
+      var parsed = JSON.parse(raw);
+      if (!parsed || !parsed.batches) return;
+      Object.keys(parsed.batches).forEach(function (batchName) {
+        if (!supBatches[batchName]) return; // skip invalid / old custom batches
+        var lb = parsed.batches[batchName];
+        if (lb.submitted) return;
+        Object.keys(lb.workers).forEach(function (wid) {
+          var cb = supBatches[batchName].workers;
+          if (!cb[wid] || cb[wid].status === 'pending') cb[wid] = lb.workers[wid];
+        });
+      });
+    } catch (e) {}
+    if (!activeBatch || !supBatches[activeBatch]) {
+      var keys = Object.keys(supBatches);
+      activeBatch = keys[0] || '';
+    }
+  }
+
+  // ---- Batch state helpers ----
+  // Each worker can only be in one batch — their own designation.
+  function ensureBatch(name) {
+    if (!name) return null;
+    if (!supBatches[name]) supBatches[name] = { workers: {}, submittedAt: null, submitted: false };
+    return supBatches[name];
+  }
+
+  // Get the batch this worker belongs to (based on their designation).
+  function batchForWorker(workerId) {
+    var w = supWorkerMap[String(workerId)];
+    return ensureBatch(w && w.designation ? w.designation : 'Undesignated');
+  }
+
+  function activeAttendance() {
+    if (!activeBatch || !supBatches[activeBatch]) return {};
+    return supBatches[activeBatch].workers;
+  }
+
+  // Find this worker's mark across ALL batches (worker is only in one).
+  // Used by search results to show the current mark regardless of active tab.
+  function supRecord(workerId) {
+    var wid = String(workerId);
+    var keys = Object.keys(supBatches);
+    for (var i = 0; i < keys.length; i++) {
+      var w = supBatches[keys[i]].workers[wid];
+      if (w && w.status !== 'pending') return w;
+    }
+    return { status: 'pending' };
+  }
+
+  // Which batch does this worker currently sit in? (or null)
+  function batchNameForWorker(workerId) {
+    var wid = String(workerId);
+    var keys = Object.keys(supBatches);
+    for (var i = 0; i < keys.length; i++) {
+      if (supBatches[keys[i]].workers[wid]) return keys[i];
+    }
+    return null;
+  }
 
   function supMarkPresent(workerId) {
-    supAttendance[String(workerId)] = { status: 'present', hoursWorked: 9, overtimeHours: 0, remarks: '' };
+    var wid = String(workerId);
+    var w = supWorkerMap[wid];
+    var targetBatch = batchForWorker(wid);
+    if (!targetBatch) { supToast('Worker has no designation — cannot assign to a batch.', 'error'); return; }
+    var targetName = (w && w.designation) ? w.designation : 'Undesignated';
+    var existingBatch = batchNameForWorker(wid);
+    if (existingBatch && existingBatch !== targetName) {
+      var existing = supBatches[existingBatch] && supBatches[existingBatch].workers[wid];
+      if (existing && existing.status !== 'pending') {
+        supToast(w.name + ' is already marked as ' + existing.status + ' in "' + existingBatch + '". Remove that first.', 'error');
+        return;
+      }
+    }
+    targetBatch.workers[wid] = { status: 'present', hoursWorked: 9, overtimeHours: 0, remarks: '' };
     supDirty = true; supSaveLocalDraft();
-    supUpdateMetrics(); supRenderSearch(); supRenderTable();
+    supUpdateMetrics(); supRenderTabs(); supRenderSearch(); supRenderTable();
   }
 
   function supMarkAbsent(workerId) {
-    supAttendance[String(workerId)] = { status: 'absent', hoursWorked: 0, overtimeHours: 0, remarks: '' };
+    var wid = String(workerId);
+    var w = supWorkerMap[wid];
+    var targetBatch = batchForWorker(wid);
+    if (!targetBatch) { supToast('Worker has no designation — cannot assign to a batch.', 'error'); return; }
+    var targetName = (w && w.designation) ? w.designation : 'Undesignated';
+    var existingBatch = batchNameForWorker(wid);
+    if (existingBatch && existingBatch !== targetName) {
+      var existing = supBatches[existingBatch] && supBatches[existingBatch].workers[wid];
+      if (existing && existing.status !== 'pending') {
+        supToast(w.name + ' is already marked in "' + existingBatch + '". Remove that first.', 'error');
+        return;
+      }
+    }
+    targetBatch.workers[wid] = { status: 'absent', hoursWorked: 0, overtimeHours: 0, remarks: '' };
     supDirty = true; supSaveLocalDraft();
-    supUpdateMetrics(); supRenderSearch(); supRenderTable();
+    supUpdateMetrics(); supRenderTabs(); supRenderSearch(); supRenderTable();
   }
 
-  function supClear(workerId) { delete supAttendance[String(workerId)]; supDirty = true; supSaveLocalDraft(); supUpdateMetrics(); supRenderSearch(); supRenderTable(); }
+  function supClear(workerId) {
+    var wid = String(workerId);
+    var batchName = batchNameForWorker(wid);
+    if (batchName && supBatches[batchName]) {
+      delete supBatches[batchName].workers[wid];
+    }
+    supDirty = true; supSaveLocalDraft();
+    supUpdateMetrics(); supRenderTabs(); supRenderSearch(); supRenderTable();
+  }
 
   function supSelectedIds() { var ids = []; document.querySelectorAll('.sup-sel:checked').forEach(function (cb) { ids.push(cb.dataset.id); }); return ids; }
 
-  // ---- Local persistence ----
+  // ---- Local persistence (all batches) ----
   var supDraftTimer = null;
   function supSaveLocalDraft() {
-    // Debounce: coalesce rapid marks/absents into one localStorage write per
-    // 500 ms instead of paying JSON.stringify + disk on every click.
     clearTimeout(supDraftTimer);
     supDraftTimer = setTimeout(function () {
       try {
-        localStorage.setItem('supDraft:' + supDate(), JSON.stringify(supAttendance));
+        var payload = { active: activeBatch, batches: supBatches };
+        localStorage.setItem('supDraft:' + supDate(), JSON.stringify(payload));
         localStorage.setItem('supDraft:lastDate', supDate());
       } catch (e) {}
     }, 500);
   }
-  function supLoadLocalDraft() { try { var lastDate = localStorage.getItem('supDraft:lastDate'); if (!lastDate) return; var raw = localStorage.getItem('supDraft:' + lastDate); if (!raw) return; var parsed = JSON.parse(raw); if (parsed && typeof parsed === 'object' && Object.keys(supAttendance).length === 0) supAttendance = parsed; } catch (e) {} }
-
 
   // ---- Cloud submit helpers ----
   // Map local statuses to values the live CHECK constraint allows.
@@ -429,7 +661,11 @@
   // (missing column), return on any other error.  Supabase never throws —
   // errors are always in result.error.
   function tryWriteRows(client, rows, op) {
+    // First col-set includes batch_name. If the column doesn't exist (old DB
+    // schema) we fall back to the original 2-col natural key.
     var colSets = [
+      ['worker_id','attendance_date','status','hours_worked','overtime_hours','notes','batch_name','supervisor_id','submitted_by'],
+      ['worker_id','attendance_date','status','hours_worked','overtime_hours','notes','batch_name'],
       ['worker_id','attendance_date','status','hours_worked','overtime_hours','notes'],
       ['worker_id','attendance_date','status','hours_worked','overtime_hours'],
       ['worker_id','attendance_date','status']
@@ -444,89 +680,121 @@
         cols.forEach(function (c) { if (r[c] !== undefined) out[c] = r[c]; });
         return out;
       });
-      var q = op === 'insert'
-        ? client.from('attendance').insert(payload)
-        : client.from('attendance').upsert(payload, { onConflict: 'id' });
+      // Use batch_name-aware conflict when this col-set includes it,
+      // otherwise fall back to the original 2-col conflict.
+      var hasBatch = cols.indexOf('batch_name') >= 0;
+      var conflict = hasBatch ? 'worker_id,attendance_date,batch_name' : 'worker_id,attendance_date';
+      var q = client.from('attendance').upsert(payload, { onConflict: conflict }).select('id,worker_id');
       return q.then(function (res) {
         if (res && res.error) {
-          if (res.error.code === '42703') { lastErr = res.error; return next(); }
-          throw res.error;  // 23514 (check constraint), 23503 (FK), etc. → propagate
+          // If batch_name is the problem (42703 undefined_column), fall through
+          // to the next col-set which omits it.
+          if (res.error.code === '42703') {
+            lastErr = res.error;
+            return next();
+          }
+          throw res.error;
         }
-        return true;
+        return res.data || [];
       });
     }
     return next();
   }
-  // Read existing rows for a date with progressive column sets.  Returns {}
-  // on any error so the caller falls back to INSERT-ALL (duplicates are
-  // prevented by the unique index, or are benign overwrites).
-  function readExistingForDate(client, today) {
-    var colSets = ['id,worker_id', 'worker_id,attendance_date,status', 'worker_id,attendance_date'];
-    var i = 0;
-    function next() {
-      if (i >= colSets.length) return Promise.resolve({});
-      return client.from('attendance').select(colSets[i++]).eq('attendance_date', today)
-        .then(function (res) {
-          if (res && res.error) {
-            if (res.error.code === '42703') return next();
-            return {};  // table missing / RLS → fall through to INSERT-ALL
-          }
-          var byWorker = {};
-          (res.data || []).forEach(function (row) { if (row.worker_id != null) byWorker[String(row.worker_id)] = row.id; });
-          return byWorker;
-        });
-    }
-    return next();
+  // ---- Render: batch tabs ----
+  // Each tab is a worker designation. Click to switch active batch.
+  // No delete or add buttons — batches are derived from the workers table.
+  function supRenderTabs() {
+    var wrap = document.getElementById('supBatchTabs');
+    if (!wrap) return;
+    var names = Object.keys(supBatches).sort();
+    var html = '';
+    names.forEach(function (name) {
+      var b = supBatches[name];
+      var presentCount = 0, otTotal = 0;
+      Object.keys(b.workers).forEach(function (wid) {
+        var r = b.workers[wid];
+        if (r && r.status === 'present') presentCount++;
+        if (r && r.overtimeHours) otTotal += Number(r.overtimeHours) || 0;
+      });
+      var submittedClass = b.submitted ? ' submitted' : '';
+      var activeClass = (name === activeBatch) ? ' active' : '';
+      var check = b.submitted ? ' <span class="batch-tab-check">&#10003;</span>' : '';
+      html += '<div class="batch-tab' + activeClass + submittedClass + '" data-batch="' + supEscape(name) + '">' +
+        '<span class="batch-tab-name">' + supEscape(name) + check + '</span>' +
+        '<span class="batch-tab-meta">' + presentCount + ' present &middot; ' + otTotal.toFixed(1) + 'h OT</span></div>';
+    });
+    wrap.innerHTML = html;
+    wrap.querySelectorAll('.batch-tab').forEach(function (t) {
+      t.addEventListener('click', function () {
+        activeBatch = t.dataset.batch;
+        supRenderTabs(); supRenderSearch(); supRenderTable(); supUpdateMetrics();
+        supSaveLocalDraft();
+      });
+    });
   }
 
-  // ---- Cloud submit ----
-  // ---- Cloud submit ----
-  async function supSubmitAttendance() {
-    if (!supSession) { supToast('Not signed in', 'error'); return; }
+  // ---- Cloud submit per batch ----
+  // Each batch (designation) is submitted independently. After writing attendance
+  // rows to the cloud, each row is sent through the approval workflow pipeline
+  // (Supervisor Review → Accountant → Final Approval).
+  async function supSubmitBatch(batchName) {
+    if (!supSession) { supToast("Not signed in", "error"); return; }
     var client = supInitClient();
-    if (!client) { supToast('Supabase not configured', 'error'); return; }
+    if (!client) { supToast("Supabase not configured", "error"); return; }
     var today = supDate();
+    var batch = ensureBatch(batchName);
+    if (!batch) { supToast('Batch "' + batchName + '" not found', 'error'); return; }
     var records = [];
-    Object.keys(supAttendance).forEach(function (wid) {
-      var r = supAttendance[wid];
-      if (!r || r.status === 'pending' || r.status == null || !validStatuses.includes(r.status)) return;
-      // Normalise status via STATUS_MAP; unknown values fall back to 'present'
-      // so we never violate the live attendance_status_check (Postgres 23514).
-      var safeStatus = STATUS_MAP[r.status] != null ? STATUS_MAP[r.status] : 'present';
+    Object.keys(batch.workers).forEach(function (wid) {
+      var r = batch.workers[wid];
+      if (!r || r.status === "pending" || r.status == null || !validStatuses.includes(r.status)) return;
+      var safeStatus = STATUS_MAP[r.status] != null ? STATUS_MAP[r.status] : "present";
       records.push({
         worker_id: wid,
         attendance_date: today,
         status: safeStatus,
         hours_worked: r.hoursWorked != null ? r.hoursWorked : 0,
         overtime_hours: r.overtimeHours != null ? r.overtimeHours : 0,
-        notes: r.remarks || ''
+        notes: r.remarks || "",
+        batch_name: batchName,
+        supervisor_id: supSession.user.id,
+        submitted_by: supSession.user.id
       });
     });
-    if (!records.length) { supToast('Nothing to submit', 'error'); return; }
-    supToast('Submitting ' + records.length + ' record(s)...', 'info');
-    // Live DB: no unique(worker_id, attendance_date) index → manual select-then-insert.
-    // Live DB: column-set may be partial → helpers retry on 42703.
+    if (!records.length) { supToast('Nothing to submit in "' + batchName + '"', "error"); return; }
+    supToast('Submitting ' + records.length + ' record(s) in "' + batchName + '"...', "info");
     try {
-      var existingByWorker = await readExistingForDate(client, today);
-      var toInsert = [], toUpdate = [];
-      records.forEach(function (rec) {
-        var existingId = existingByWorker[String(rec.worker_id)];
-        if (existingId) toUpdate.push(Object.assign({ id: existingId }, rec));
-        else toInsert.push(rec);
-      });
-      await tryWriteRows(client, toUpdate, 'upsert-id');
-      await tryWriteRows(client, toInsert, 'insert');
+      var upsertedRows = await tryWriteRows(client, records);
+      // Send each row through the approval pipeline
+      if (Array.isArray(upsertedRows) && upsertedRows.length) {
+        var submitterId = supSession.user.id;
+        var submitterName = (supProfile && supProfile.full_name) || (supSession.user.email) || "Supervisor";
+        await Promise.all(upsertedRows.map(function(row) {
+          return client.rpc("submit_for_approval", {
+            p_attendance_id: row.id,
+            p_submitter_id: submitterId,
+            p_submitter_name: submitterName
+          }).then(function(r) {
+            if (r && r.error) console.warn("[Supervisor] submit_for_approval failed for row", row.id, ":", r.error);
+          }).catch(function(e) {
+            console.warn("[Supervisor] submit_for_approval RPC not available yet:", e.message);
+          });
+        }));
+      }
+      batch.submitted = true;
+      batch.submittedAt = new Date().toISOString();
       supDirty = false;
-      supToast('Submitted ' + records.length + ' record(s)', 'success');
-      supLoadAttendance();
+      supSaveLocalDraft();
+      supToast('Submitted ' + records.length + ' record(s) in "' + batchName + '" → awaiting approval', "success");
+      supRenderTabs();
     } catch (e) {
-      var msg = e && (e.message || (e.error && e.error.message)) || (typeof e === 'string' ? e : 'unknown');
-      supToast('Submit failed: ' + msg, 'error');
-      console.error('[Supervisor] submit attendance error:', e);
+      var msg = e && (e.message || (e.error && e.error.message)) || (typeof e === "string" ? e : "unknown");
+      supToast("Submit failed: " + msg, "error");
+      console.error("[Supervisor] submit attendance error:", e);
     }
   }
-
-
+  // Back-compat: submit the active batch when the toolbar button is clicked.
+  async function supSubmitAttendance() { return supSubmitBatch(activeBatch); }
   // ---- Render: search results (top panel) ----
   // supWorkers is populated by supSearchWorkers() when the user searches.
   // supRenderSearch renders those results with live status pills.
@@ -542,11 +810,14 @@
       var r = supRecord(w.id);
       var already = r.status !== 'pending';
       var statusClass = r.status === 'present' ? 'present' : (r.status === 'absent' ? 'absent' : 'pending');
+      var design = w.designation || 'Undesignated';
       var card = document.createElement('div');
       card.className = 'sup-worker-card';
       card.innerHTML =
         '<div class="sup-worker-info">' +
-          '<div class="sup-worker-name">' + supEscape(w.name) + '</div>' +
+          '<div class="sup-worker-name">' + supEscape(w.name) +
+            ' <span class="sup-pill pending" title="Designation / batch">' + supEscape(design) + '</span>' +
+          '</div>' +
           '<div class="sup-worker-meta">' +
             '<span>' + supEscape(w.employeeNo || '-') + '</span>' +
             '<span>' + supEscape(w.department || '-') + '</span>' +
@@ -572,17 +843,17 @@
   function supRenderTable() {
     var tbody = document.getElementById('supMarkedTable');
     if (!tbody) return;
+    var att = activeAttendance();
     var rows = [];
-    Object.keys(supAttendance).forEach(function (wid) {
-      var r = supAttendance[wid];
+    Object.keys(att).forEach(function (wid) {
+      var r = att[wid];
       if (!r || r.status === 'pending') return;
-      var w = supWorkers.find(function (x) { return String(x.id) === String(wid); });
-      if (!w) w = { id: wid, name: '(unknown worker)', employeeNo: '' };
+      var w = supWorkerMap[wid] || { id: wid, name: '(unknown worker)', employeeNo: '' };
       rows.push({ w: w, r: r });
     });
     rows.sort(function (a, b) { return String(a.w.name).localeCompare(String(b.w.name)); });
     if (rows.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" class="sup-empty">No attendance marked yet. Search a worker above and tap "Mark present".</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="sup-empty">No attendance marked in this batch. Search a worker above and tap "Mark present".</td></tr>';
       return;
     }
     tbody.innerHTML = '';
@@ -610,41 +881,55 @@
   }
 
   function supUpdateMetrics() {
-    // Count by status from supAttendance (the source of truth for what was marked today)
-    var present = 0, absent = 0;
-    Object.keys(supAttendance).forEach(function (wid) {
-      var r = supAttendance[wid];
+    var present = 0, absent = 0, otTotal = 0;
+    var att = activeAttendance();
+    Object.keys(att).forEach(function (wid) {
+      var r = att[wid];
+      if (!r) return;
       if (r.status === 'present') present++;
       else if (r.status === 'absent') absent++;
+      if (r.overtimeHours) otTotal += Number(r.overtimeHours) || 0;
     });
-    var expected = supAssignedCount != null ? supAssignedCount : 0;
-    var pending = Math.max(0, expected - present - absent);
+    // Update the batch label chips
+    var batchLabel = document.getElementById('supBatchLabel');
+    var batchLabel2 = document.getElementById('supBatchLabel2');
+    if (batchLabel) batchLabel.textContent = activeBatch || '—';
+    if (batchLabel2) batchLabel2.textContent = activeBatch || '—';
+    // Update stat tiles
     var exp = document.getElementById('supExpected');
     var pr = document.getElementById('supPresent');
     var ab = document.getElementById('supAbsent');
     var pe = document.getElementById('supPending');
-    if (exp) exp.textContent = expected;
+    if (exp) exp.textContent = (supAssignedCount != null ? supAssignedCount : 0);
     if (pr) pr.textContent = present;
     if (ab) ab.textContent = absent;
-    if (pe) pe.textContent = pending;
+    if (pe) {
+      pe.textContent = otTotal.toFixed(1) + 'h';
+      var peSub = pe.parentElement.querySelector('.sup-stat-sub');
+      if (peSub) peSub.textContent = 'OT in ' + (activeBatch || 'all');
+    }
   }
 
   function supEditRow(workerId) {
-    var r = supRecord(workerId);
+    var wid = String(workerId);
+    var batchName = batchNameForWorker(wid);
+    if (!batchName) { supToast('Worker is not marked in any batch.', 'error'); return; }
+    var att = supBatches[batchName].workers;
+    var r = att[wid] || { status: 'pending' };
     var hours = prompt('Hours worked (default 9):', r.hoursWorked != null ? r.hoursWorked : 9);
     if (hours === null) return;
     var ot = prompt('Overtime hours (default 0):', r.overtimeHours != null ? r.overtimeHours : 0);
     if (ot === null) return;
     var remarks = prompt('Remarks:', r.remarks || '');
     if (remarks === null) return;
-    supAttendance[String(workerId)] = {
+    att[wid] = {
       status: r.status === 'pending' ? 'present' : (validStatuses.includes(r.status) ? r.status : 'present'),
       hoursWorked: parseFloat(hours) || 0,
       overtimeHours: parseFloat(ot) || 0,
       remarks: remarks
     };
     supDirty = true; supSaveLocalDraft();
-    supUpdateMetrics(); supRenderSearch(); supRenderTable();
+    supUpdateMetrics(); supRenderTabs(); supRenderSearch(); supRenderTable();
   }
 
   function supEscape(s) { if (s == null) return ''; return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -659,9 +944,13 @@
 
   window.supervisorPortal = {
     getWorkers: function () { return supWorkers; },
-    getAttendance: function () { return supAttendance; },
+    getAttendance: function () { return activeAttendance(); },
+    getBatches: function () { return supBatches; },
+    getActiveBatch: function () { return activeBatch; },
+    setActiveBatch: function (n) { if (supBatches[n]) { activeBatch = n; supRenderTabs(); supRenderSearch(); supRenderTable(); supUpdateMetrics(); } },
     submit: supSubmitAttendance,
-    reload: supLoadWorkersAndAttendance
+    submitBatch: supSubmitBatch,
+    reload: function () { if (typeof supLoadWorkersAndAttendance === 'function') supLoadWorkersAndAttendance(); }
   };
 })();
 

@@ -6,6 +6,33 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+/** Ensure the roles table has the default roles seeded. */
+async function ensureRoles(admin: ReturnType<typeof createClient>): Promise<void> {
+  const { data: existing } = await admin.from('roles').select('id').limit(1);
+  if (existing && existing.length > 0) return;
+  const defaultRoles = [
+    { name: 'super_admin', description: 'Full system access' },
+    { name: 'administrator', description: 'Manage users and settings' },
+    { name: 'supervisor', description: 'Approve attendance and manage workers' },
+    { name: 'accounts', description: 'View and manage payroll' },
+  ];
+  await admin.from('roles').insert(defaultRoles);
+}
+
+/** Test if the active column exists in profiles. */
+async function profilesHasActive(admin: ReturnType<typeof createClient>): Promise<boolean> {
+  try { const r = await admin.from('profiles').select('active').limit(1); return !r.error; }
+  catch (_e) { return false; }
+}
+
+/** Get the super_admin role ID, falling back to any first role. */
+async function getDefaultAdminRoleId(admin: ReturnType<typeof createClient>): Promise<string | null> {
+  const { data: role } = await admin.from('roles').select('id').eq('name', 'super_admin').maybeSingle();
+  if (role?.id) return role.id;
+  const { data: anyRole } = await admin.from('roles').select('id').limit(1).maybeSingle();
+  return anyRole?.id || null;
+}
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -34,13 +61,35 @@ Deno.serve(async (req) => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const { data: callerProfile, error: callerProfileError } = await admin
+  // Bootstrap: ensure roles exist so first-time setup works
+  await ensureRoles(admin);
+  const hasActiveCol = await profilesHasActive(admin);
+
+  let { data: callerProfile, error: callerProfileError } = await admin
     .from('profiles')
     .select('id,full_name,active,role_id,roles(name)')
     .eq('id', user.id)
     .maybeSingle();
 
-  if (callerProfileError || !callerProfile?.active) return json({ error: 'Labour Force profile is inactive or missing' }, 403);
+  // If the caller's profile doesn't exist, this is a first-time bootstrap.
+  // Auto-create their profile as super_admin so they can log in.
+  if (callerProfileError || !callerProfile) {
+    const defaultRoleId = await getDefaultAdminRoleId(admin);
+    if (defaultRoleId) {
+      const upsertPayload: Record<string, unknown> = {
+        id: user.id,
+        full_name: user.user_metadata?.full_name || user.email,
+        email: user.email,
+        role_id: defaultRoleId,
+      };
+      if (hasActiveCol) upsertPayload['active'] = true;
+      await admin.from('profiles').upsert(upsertPayload, { onConflict: 'id' });
+    }
+    ({ data: callerProfile } = await admin.from('profiles').select('id,full_name,active,role_id,roles(name)').eq('id', user.id).maybeSingle());
+  }
+
+  if (!callerProfile) return json({ error: 'Labour Force profile is inactive or missing' }, 403);
+  if (hasActiveCol && !callerProfile.active) return json({ error: 'Labour Force profile is inactive or missing' }, 403);
   const callerRole = callerProfile.roles?.name || '';
   const canManage = callerRole === 'super_admin' || callerRole === 'administrator';
   if (!canManage) return json({ error: 'You do not have permission to manage users' }, 403);
@@ -55,12 +104,19 @@ Deno.serve(async (req) => {
     const fullName = String(payload.full_name || '').trim();
     const email = String(payload.email || '').trim().toLowerCase();
     const password = String(payload.password || '');
-    const roleId = String(payload.role_id || '');
+    let roleId = String(payload.role_id || '');
     const phone = String(payload.phone || '').trim() || null;
     const active = payload.active !== false;
 
-    if (!fullName || !email || !password || password.length < 8 || !roleId) {
-      return json({ error: 'Name, email, role and an 8+ character password are required' }, 400);
+    if (!fullName || !email || !password || password.length < 8) {
+      return json({ error: 'Name, email, and an 8+ character password are required' }, 400);
+    }
+
+    // Resolve role: if not provided, default to 'administrator' (auto-created by ensureRoles)
+    if (!roleId) {
+      const { data: adminRole } = await admin.from('roles').select('id').eq('name', 'administrator').maybeSingle();
+      roleId = adminRole?.id || (await getDefaultAdminRoleId(admin)) || '';
+      if (!roleId) return json({ error: 'No roles defined. Please try again or contact support.' }, 400);
     }
 
     const { data: role, error: roleError } = await admin.from('roles').select('id,name').eq('id', roleId).maybeSingle();
@@ -77,14 +133,17 @@ Deno.serve(async (req) => {
     });
     if (createError || !created.user) return json({ error: createError?.message || 'Could not create Auth user' }, 400);
 
-    const { error: profileError } = await admin.from('profiles').insert({
+    // Build profile insert payload — omit active if column doesn't exist
+    const profilePayload: Record<string, unknown> = {
       id: created.user.id,
       full_name: fullName,
       email,
       phone,
       role_id: roleId,
-      active,
-    });
+    };
+    if (hasActiveCol) profilePayload['active'] = active;
+
+    const { error: profileError } = await admin.from('profiles').insert(profilePayload);
 
     if (profileError) {
       await admin.auth.admin.deleteUser(created.user.id);

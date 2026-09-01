@@ -126,6 +126,21 @@ input[type="checkbox"]{width:15px;height:15px;cursor:pointer;accent-color:var(--
 
 /* Loading */
 .sup-loading{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;padding:60px 0;color:var(--muted);font-size:13px}
+/* Batch tabs */
+.batch-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:14px 18px;background:var(--surface);border:1px solid var(--border);border-radius:14px;margin-bottom:18px;min-height:54px}
+.batch-tab{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:999px;cursor:pointer;font-size:12px;transition:all .15s;position:relative;user-select:none}
+.batch-tab:hover{border-color:var(--accent)}
+.batch-tab.active{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 0 0 2px rgba(88,166,255,.25)}
+.batch-tab.active .batch-tab-meta{color:rgba(255,255,255,.85)}
+.batch-tab.submitted{opacity:.7}
+.batch-tab.submitted .batch-tab-check{color:var(--accent2);font-weight:700;margin-left:2px}
+.batch-tab-name{font-weight:600}
+.batch-tab-meta{color:var(--muted);font-size:11px;font-weight:500}
+.batch-tab-del{background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:16px;line-height:1;padding:0 4px;margin-left:2px;border-radius:50%;width:20px;height:20px;display:grid;place-items:center}
+.batch-tab-del:hover{color:var(--danger);background:rgba(248,81,73,.1)}
+.batch-tab-new{background:transparent;border:1px dashed var(--border);color:var(--muted);padding:8px 16px;border-radius:999px;cursor:pointer;font-size:12px;font-weight:500;transition:all .15s}
+.batch-tab-new:hover{border-color:var(--accent);color:var(--accent);border-style:solid}
+.batch-label-chip{display:inline-block;background:var(--accent);color:#fff;font-size:11px;padding:2px 10px;border-radius:999px;margin-left:8px;font-weight:600;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -182,10 +197,15 @@ input[type="checkbox"]{width:15px;height:15px;cursor:pointer;accent-color:var(--
     <div class="sup-stat"><div class="sup-stat-label">Pending</div><div class="sup-stat-value pending" id="supPending">0</div><div class="sup-stat-sub">unmarked</div></div>
   </div>
 
+  <!-- Batch tabs: one per worker designation, click to switch active batch -->
+  <div class="batch-bar" id="supBatchTabs">
+    <!-- rendered by supRenderTabs() -->
+  </div>
+
   <!-- Search -->
   <section class="sup-section">
     <div class="sup-section-head">
-      <span>Add attendance</span>
+      <span>Add attendance <span id="supBatchLabel" class="batch-label-chip">Wagon</span></span>
       <div class="right">
         <div class="sup-search-wrap">
           <span class="sup-search-icon">&#x1F50D;</span>
@@ -203,12 +223,12 @@ input[type="checkbox"]{width:15px;height:15px;cursor:pointer;accent-color:var(--
   <!-- Table -->
   <section class="sup-section">
     <div class="sup-section-head">
-      <span>Todays attendance</span>
+      <span>Attendance <span id="supBatchLabel2" class="batch-label-chip">Wagon</span></span>
       <div class="right">
         <button class="btn btn-secondary" id="supEditSelected">Edit selected</button>
         <button class="btn btn-danger" id="supMarkAbsentSelected">Mark absent</button>
         <button class="btn btn-ghost" id="supCancelSelected">Clear mark</button>
-        <button class="btn btn-primary" id="supSubmitBtn">Submit to cloud</button>
+        <button class="btn btn-primary" id="supSubmitBtn">Submit batch</button>
       </div>
     </div>
     <div class="sup-table-wrap">
@@ -231,6 +251,6 @@ input[type="checkbox"]{width:15px;height:15px;cursor:pointer;accent-color:var(--
 <script src="config.js?v=20260829020000"></script>
 <script src="data.js"></script>
 <script src="supabase.js?v=20260830000001"></script>
-<script src="supervisor.js?v=20260830000002"></script>
+<script src="supervisor.js?v=20260901100000"></script>
 </body>
 </html>
