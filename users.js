@@ -15,8 +15,8 @@ let lfUserLoadInFlight = null;
 function lfRoleLabel(name){
   return String(name||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
 }
-function lfCurrentRoleName(){ return window.lfCurrentRole || ''; }
-function lfCanManageUsers(){ return lfCurrentRoleName()==='super_admin' || lfCurrentRoleName()==='administrator'; }
+function lfCurrentRoleName(){ return String(window.lfCurrentRole || '').toLowerCase(); }
+function lfCanManageUsers(){ return lfCurrentRoleName()==='super_admin' || lfCurrentRoleName()==='super admin' || lfCurrentRoleName()==='administrator'; }
 
 async function loadUserAccessData(){
   if(!labourForceSupabase || !labourForceSession){ return false; }

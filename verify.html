@@ -7,14 +7,14 @@
 <title>LabourForce - Verify Attendance</title>
 <meta name="description" content="Check your recorded work days">
 <style>
-:root{--vf-bg:#f4f6fa;--vf-surface:#ffffff;--vf-ink:#0b1220;--vf-ink-2:#1f2937;--vf-muted:#475569;--vf-border:#d8dee6;--vf-border-strong:#94a3b8;--vf-primary:#0b57d0;--vf-primary-pressed:#0849ab;--vf-primary-soft:#e3efff;--vf-danger:#b42318;--vf-danger-soft:#fee4e2;--vf-success:#027a48;--vf-success-soft:#d1fadf;--vf-warning:#b54708;--vf-warning-soft:#fef0c7;--vf-today-ring:#1d4ed8;--vf-shadow:0 1px 2px rgba(15,23,42,.06),0 4px 14px rgba(15,23,42,.04);--vf-radius:16px;--vf-radius-sm:10px;--vf-tap:48px}
+:root{--vf-bg:#f3f8f8;--vf-surface:#ffffff;--vf-ink:#10202a;--vf-ink-2:#1d3440;--vf-muted:#58717a;--vf-border:#d4e3e5;--vf-border-strong:#8ca9ae;--vf-primary:#087f78;--vf-primary-pressed:#06655f;--vf-primary-soft:#dff7f2;--vf-danger:#b42335;--vf-danger-soft:#fee4e7;--vf-success:#087f5b;--vf-success-soft:#d7f8e8;--vf-warning:#a35b08;--vf-warning-soft:#fff1d6;--vf-today-ring:#0b8f86;--vf-shadow:0 1px 2px rgba(15,40,42,.06),0 8px 24px rgba(7,65,75,.08);--vf-radius:16px;--vf-radius-sm:10px;--vf-tap:48px}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 html{-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:var(--vf-bg);color:var(--vf-ink);min-height:100vh;min-height:100dvh;-webkit-font-smoothing:antialiased;line-height:1.5;font-size:16px}
-.vf-header{background:#0b1220;color:#fff;padding:14px 16px;padding-top:max(14px,env(safe-area-inset-top));display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 1px 0 rgba(255,255,255,.06)}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI",sans-serif;background:var(--vf-bg);color:var(--vf-ink);min-height:100vh;min-height:100dvh;-webkit-font-smoothing:antialiased;line-height:1.5;font-size:16px}
+.vf-header{background:#071d26;color:#fff;padding:14px 16px;padding-top:max(14px,env(safe-area-inset-top));display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 1px 0 rgba(103,232,249,.16)}
 .vf-logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:#fff;min-width:0}
-.vf-logo-mark{width:38px;height:38px;flex-shrink:0;background:linear-gradient(135deg,#2563eb,#1d4ed8);border-radius:10px;display:grid;place-items:center;font-size:16px;font-weight:800;color:#fff;box-shadow:0 2px 6px rgba(37,99,235,.4)}
+.vf-logo-mark{width:38px;height:38px;flex-shrink:0;background:linear-gradient(135deg,#5eead4,#38bdf8);border-radius:10px;display:grid;place-items:center;font-size:16px;font-weight:800;color:#05212a;box-shadow:0 2px 10px rgba(94,234,212,.3)}
 .vf-logo-text{font-size:15px;font-weight:700;letter-spacing:-.01em;min-width:0}
 .vf-logo-text small{display:block;font-size:11px;font-weight:500;color:#9ca3af;margin-top:1px;letter-spacing:.02em}
 .vf-header-action{background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.18);padding:10px 14px;border-radius:var(--vf-radius-sm);font-size:13px;font-weight:600;cursor:pointer;min-height:42px;display:none;font-family:inherit;transition:background .15s}
@@ -481,6 +481,25 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica N
 </div>
 <script src="vendor/supabase.min.js"></script>
 <script src="config.js"></script>
+<script>
+(function(){
+  var key='labourforce_verify_view_state';
+  var frame=0;
+  function save(){
+    if(frame)return;
+    frame=requestAnimationFrame(function(){
+      frame=0;
+      try{localStorage.setItem(key,JSON.stringify({scrollY:window.scrollY||0}));}catch(e){}
+    });
+  }
+  window.addEventListener('scroll',save,{passive:true});
+  window.addEventListener('beforeunload',function(){try{localStorage.setItem(key,JSON.stringify({scrollY:window.scrollY||0}));}catch(e){}});
+  try{
+    var state=JSON.parse(localStorage.getItem(key)||'{}');
+    window.addEventListener('load',function(){requestAnimationFrame(function(){window.scrollTo(0,Math.max(0,Number(state.scrollY)||0));});});
+  }catch(e){}
+})();
+</script>
 <script src="verify.js"></script>
 </body>
 </html>

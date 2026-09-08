@@ -18,6 +18,25 @@
 
   var supDepartments = {}; // { [departmentId]: name }
   var validStatuses = ['pending','present','absent','late','half_day','excused','off_day','pending_verification','worked','approved'];
+  var supViewStateKey = 'labourforce_supervisor_view_state';
+  var supScrollFrame = 0;
+  function supSaveViewState() {
+    if (supScrollFrame) return;
+    supScrollFrame = requestAnimationFrame(function () {
+      supScrollFrame = 0;
+      try { localStorage.setItem(supViewStateKey, JSON.stringify({ scrollY: window.scrollY || 0 })); } catch (e) {}
+    });
+  }
+  function supRestoreViewState() {
+    try {
+      var state = JSON.parse(localStorage.getItem(supViewStateKey) || '{}');
+      requestAnimationFrame(function () { window.scrollTo(0, Math.max(0, Number(state.scrollY) || 0)); });
+    } catch (e) {}
+  }
+  window.addEventListener('scroll', supSaveViewState, { passive: true });
+  window.addEventListener('beforeunload', function () {
+    try { localStorage.setItem(supViewStateKey, JSON.stringify({ scrollY: window.scrollY || 0 })); } catch (e) {}
+  });
 
   function supInitClient() {
     // Preferred: client already initialized by supabase.js (boots async, may not be ready on first try)
@@ -335,6 +354,7 @@
     supLoadLocalDraft();
     // Render the batch tabs bar once on page load
     supRenderTabs();
+    supRestoreViewState();
   });
 
   // ---- Worker loading (on portal entry) ----
@@ -631,6 +651,29 @@
 
   function supSelectedIds() { var ids = []; document.querySelectorAll('.sup-sel:checked').forEach(function (cb) { ids.push(cb.dataset.id); }); return ids; }
 
+  function supLoadLocalDraft() {
+    try {
+      var lastDate = localStorage.getItem('supDraft:lastDate');
+      if (!lastDate || !supDate) return;
+      var raw = localStorage.getItem('supDraft:' + lastDate);
+      if (!raw) return;
+      var parsed = JSON.parse(raw);
+      if (!parsed || !parsed.batches) return;
+      supBatches = parsed.batches || {};
+      if (parsed.active && supBatches[parsed.active]) activeBatch = parsed.active;
+      if (!activeBatch || !supBatches[activeBatch]) {
+        var keys = Object.keys(supBatches);
+        activeBatch = keys[0] || '';
+      }
+      supUpdateMetrics();
+      supRenderTabs();
+      supRenderSearch();
+      supRenderTable();
+    } catch (e) {
+      console.warn('[Supervisor] local draft unavailable:', e && e.message || e);
+    }
+  }
+
   // ---- Local persistence (all batches) ----
   var supDraftTimer = null;
   function supSaveLocalDraft() {
@@ -859,7 +902,7 @@
     tbody.innerHTML = '';
     rows.forEach(function (entry) {
       var w = entry.w, r = entry.r;
-      var statusClass = r.status === 'present' ? 'pill-present' : 'pill-absent';
+      var statusClass = r.status === 'present' ? 'present' : (r.status === 'absent' ? 'absent' : 'pending');
       var tr = document.createElement('tr');
       tr.innerHTML =
         '<td><input type="checkbox" class="sup-sel" data-id="' + w.id + '"></td>' +

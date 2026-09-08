@@ -161,7 +161,7 @@ window.saveDeployment=function(){
 /* Allocation now creates deployment history too. */
 window.saveAllocation=function(){
   const r=requestById(Number(document.getElementById('allocationRequestId').value));if(!r)return;
-  const ids=[...document.querySelectorAll('#workerPicker input:checked')].map(x=>Number(x.value));
+  const ids=typeof window.lfGetAllocationSelectedIds==='function'?window.lfGetAllocationSelectedIds():[...document.querySelectorAll('#workerPicker input:checked')].map(x=>Number(x.value));
   if(ids.length>r.workersRequired){alert(`This request requires only ${r.workersRequired} worker(s).`);return;}
   const previous=r.allocatedWorkerIds||[];r.allocatedWorkerIds=ids;r.status=ids.length?'Allocated':'Approved';
   ids.forEach(id=>{
@@ -184,7 +184,7 @@ function renderAdvancedDashboard(){
     const dash=document.getElementById('dashboard');if(!dash)return;
     box=document.createElement('div');box.id='advancedDashboard';dash.appendChild(box);
   }
-  box.innerHTML=`<div class="section"><div class="section-header"><h2>Operations Snapshot</h2><span class="muted">Live local data</span></div><div class="inner-padding"><div class="cards"><div class="card"><div class="card-label">Available Workforce</div><div class="card-value">${available.length}</div><div class="card-sub">of ${active.length} active workers</div></div><div class="card"><div class="card-label">Active Deployments</div><div class="card-value">${deployments.filter(d=>d.status==='Active').length}</div><div class="card-sub">Current assignments</div></div><div class="card"><div class="card-label">Pending Requests</div><div class="card-value">${pending}</div><div class="card-sub">Awaiting action</div></div><div class="card"><div class="card-label">Labour Shortage</div><div class="card-value">${shortage}</div><div class="card-sub">Workers still required</div></div></div></div></div>`;
+  box.innerHTML=`<div class="section"><div class="section-header"><h2>Operations Snapshot</h2><span class="muted">Select a metric to investigate</span></div><div class="inner-padding"><div class="cards"><div class="card card-clickable" onclick="showPage('availability')" role="button" tabindex="0" title="Open workforce availability"><div class="card-label">Available Workforce</div><div class="card-value">${available.length}</div><div class="card-sub">of ${active.length} active workers · Open availability</div></div><div class="card card-clickable" onclick="showPage('deployments')" role="button" tabindex="0" title="Open deployments"><div class="card-label">Active Deployments</div><div class="card-value">${deployments.filter(d=>d.status==='Active').length}</div><div class="card-sub">Current assignments · Open deployments</div></div><div class="card card-clickable" onclick="showPage('requests')" role="button" tabindex="0" title="Open labour requests"><div class="card-label">Pending Requests</div><div class="card-value">${pending}</div><div class="card-sub">Awaiting action · Open requests</div></div><div class="card card-clickable" onclick="showPage('requests')" role="button" tabindex="0" title="Open labour requests"><div class="card-label">Labour Shortage</div><div class="card-value">${shortage}</div><div class="card-sub">Workers still required · Open requests</div></div></div></div></div>`;
 }
 
 const originalRenderDashboard=window.renderDashboard;

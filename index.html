@@ -66,9 +66,9 @@
 
 <section id="dashboard" class="page active">
     <div class="cards">
-        <div class="card card-clickable" id="dashCardOnBoard"><span class="card-icon">🔄</span><div class="card-label">On Board</div><div class="card-value" id="dashboardOnBoard">0</div><div class="card-sub">Currently deployed</div></div>
-        <div class="card card-clickable" id="dashCardPresent"><span class="card-icon">✓</span><div class="card-label">Present Today</div><div class="card-value" id="dashboardPresent">0</div><div class="card-sub">Recorded present</div></div>
-        <div class="card card-clickable" id="dashCardAbsent"><span class="card-icon">✗</span><div class="card-label">Absent / Missing</div><div class="card-value" id="dashboardAbsent">0</div><div class="card-sub">Need attention</div></div>
+        <div class="card card-clickable" id="dashCardOnBoard" onclick="showPage('deployments')" role="button" tabindex="0" title="Open deployments"><span class="card-icon">🔄</span><div class="card-label">On Board</div><div class="card-value" id="dashboardOnBoard">0</div><div class="card-sub">Currently deployed · Open deployments</div></div>
+        <div class="card card-clickable" id="dashCardPresent" onclick="showPage('attendance')" role="button" tabindex="0" title="Open attendance"><span class="card-icon">✓</span><div class="card-label">Present Today</div><div class="card-value" id="dashboardPresent">0</div><div class="card-sub">Recorded present · Open attendance</div></div>
+        <div class="card card-clickable" id="dashCardAbsent" onclick="showPage('attendance')" role="button" tabindex="0" title="Open attendance"><span class="card-icon">✗</span><div class="card-label">Absent / Missing</div><div class="card-value" id="dashboardAbsent">0</div><div class="card-sub">Need attention · Open attendance</div></div>
         <div class="card card-clickable" id="dashCardRequests" onclick="showPage('requests')"><span class="card-icon">📋</span><div class="card-label">Pending Requests</div><div class="card-value" id="dashboardPendingRequests">0</div><div class="card-sub">Awaiting approval</div></div>
     </div>
 
@@ -316,7 +316,7 @@
 </template>
 
 <template id="tpl-allocationModal"><!-- Allocation modal -->
-<div class="modal-overlay" id="allocationModal"><div class="modal wide"><div class="modal-header"><h2>Allocate Workers</h2><button class="close-btn" onclick="closeModal('allocationModal')">’</button></div><div class="modal-body"><input type="hidden" id="allocationRequestId"><div id="allocationSummary" class="allocation-summary"></div><div class="worker-picker" id="workerPicker"></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('allocationModal')">Cancel</button><button class="primary" onclick="saveAllocation()">Allocate Selected Workers</button></div></div></div>
+<div class="modal-overlay" id="allocationModal"><div class="modal wide"><div class="modal-header"><h2>Allocate Workers</h2><button class="close-btn" onclick="closeModal('allocationModal')">’</button></div><div class="modal-body"><input type="hidden" id="allocationRequestId"><div id="allocationSummary" class="allocation-summary"></div><div class="allocation-worker-search"><label for="allocationWorkerSearch">Find a worker</label><input id="allocationWorkerSearch" type="search" placeholder="Search name, employee no., or ID number" autocomplete="off"></div><div class="worker-picker" id="workerPicker"></div></div><div class="modal-footer"><button class="secondary" onclick="closeModal('allocationModal')">Cancel</button><button class="primary" onclick="saveAllocation()">Allocate Selected Workers</button></div></div></div>
 </template>
 
 <template id="tpl-deploymentModal"><!-- Direct deployment modal -->

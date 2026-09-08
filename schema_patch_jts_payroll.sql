@@ -176,6 +176,8 @@ on conflict (name) do nothing;
 insert into public.permissions (code, description)
 values
   ('attendance.capture', 'Capture daily worker attendance roll-call'),
+  ('attendance.take', 'Legacy supervisor attendance capture permission'),
+  ('attendance.view', 'Legacy supervisor attendance view permission'),
   ('attendance.approve', 'Approve attendance before payroll processing'),
   ('corrections.manage', 'Resolve worker corrections and master-data updates'),
   ('disputes.manage', 'Manage disputed attendance days and review notes'),
@@ -205,6 +207,14 @@ join public.permissions p on p.code in (
   'workers.view'
 )
 where r.name in ('administrator', 'super_admin')
+on conflict do nothing;
+
+-- Keep super_admin complete as new permissions are introduced in this patch.
+insert into public.role_permissions (role_id, permission_id)
+select r.id, p.id
+from public.roles r
+cross join public.permissions p
+where r.name = 'super_admin'
 on conflict do nothing;
 
 insert into public.role_permissions (role_id, permission_id)

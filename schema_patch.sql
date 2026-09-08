@@ -12,6 +12,15 @@ where r.name = 'administrator'
   and p.code in ('users.view','users.manage')
 on conflict do nothing;
 
+-- Super admins have complete system authority. Grant every permission that
+-- exists now, including permissions added by later feature migrations.
+insert into public.role_permissions (role_id, permission_id)
+select r.id, p.id
+from public.roles r
+cross join public.permissions p
+where r.name = 'super_admin'
+on conflict do nothing;
+
 -- Users with users.manage can update profiles (role, status, phone, name).
 drop policy if exists "users manage profiles" on public.profiles;
 create policy "users manage profiles"
