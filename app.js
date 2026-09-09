@@ -164,6 +164,9 @@ function showPage(id,button){
  else{const nav=[...document.querySelectorAll('.nav button')].find(b=>(b.getAttribute('onclick')||'').includes(`'${id}'`));if(nav)nav.classList.add('active');}
  document.getElementById('pageTitle').textContent=LF_PAGE_TITLES[id]||id;
  lfCurrentPage=id;
+ if(window.history && window.history.replaceState){
+   try{ window.history.replaceState(null,'',window.location.pathname + window.location.search); }catch(_){ }
+ }
  lfSaveViewState();
  /* Auto-collapse other nav groups: only the group containing the active page stays expanded. */
  const activeBtn=button||[...document.querySelectorAll('.nav button')].find(b=>(b.getAttribute('onclick')||'').includes(`'${id}'`));
@@ -344,6 +347,21 @@ function renderAttendance(){
  const dateEl=document.getElementById("attendanceDate");if(!dateEl)return;
  const date=dateEl.value||today(),filter=document.getElementById("departmentFilter")?.value||'all';
  const day=getDayRecord(date),table=document.getElementById("attendanceTable");if(!table)return;
+ const workedEl=document.getElementById("workedCount");
+ const absentEl=document.getElementById("absentCount");
+ const missingEl=document.getElementById("missingCount");
+ const overtimeEl=document.getElementById("overtimeCount");
+ const uvEl=document.getElementById("unverifiedCount");
+ if(!day.approved){
+   if(workedEl)workedEl.textContent='0';
+   if(absentEl)absentEl.textContent='0';
+   if(missingEl)missingEl.textContent='0';
+   if(overtimeEl)overtimeEl.textContent='0';
+   if(uvEl)uvEl.textContent='0';
+   table.innerHTML='<tr><td colspan="9"><div class="empty"><div>No approved attendance for this date yet.</div><div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center"><a href="supervisor.html" style="display:inline-block;padding:8px 12px;border-radius:10px;background:#10b981;color:#041a2d;text-decoration:none;font-weight:600">Go to /supervisor</a><a href="index.html#approval" style="display:inline-block;padding:8px 12px;border-radius:10px;background:rgba(148,163,184,.15);color:#e5eefc;text-decoration:none;font-weight:600;border:1px solid rgba(148,163,184,.3)">Open /approval</a><a href="index.html#workers" style="display:inline-block;padding:8px 12px;border-radius:10px;background:rgba(148,163,184,.15);color:#e5eefc;text-decoration:none;font-weight:600;border:1px solid rgba(148,163,184,.3)">View /workers</a></div></div></td></tr>';
+   lfRenderPager('attendancePager','attendance','workers');
+   return;
+ }
  let worked=0,absent=0,missing=0,overtime=0,unverified=0;
  const rows=workers.filter(w=>w.active).filter(w=>filter==="all"||w.department===filter).map(w=>{
    const r=peekAttendance(date,w.id);
@@ -355,17 +373,39 @@ function renderAttendance(){
  });
  const locked=day.submitted||day.approved;
  const pageRows=lfPaginate('attendance',rows,25);
- table.innerHTML=pageRows.length?pageRows.map(({w,r})=>{
-   const regular=r.status==="worked"?w.rate:0,ot=Number(r.overtime||0)*w.otRate,total=regular+ot;
-   const canVerify=canVerifyAttendance()&&!locked&&(r.status==="worked"||r.status==="present")&&r.verification_status!=='verified';
-   const verifyCell=verificationBadge(r)+(canVerify?` <button class="success" onclick="verifyAttendanceRecord('${date}',${w.id})">Verify</button>`:'');
-   return `<tr><td><strong>${esc(w.name)}</strong><br><small class="muted">${esc(w.employeeNo)}</small></td><td>${esc(w.department)}</td><td>${esc(w.classification)}</td><td>${money(w.rate)}</td><td><select ${locked?"disabled":""} onchange="changeAttendanceStatus('${date}',${w.id},this.value)"><option value="pending" ${r.status==="pending"?"selected":""}>Missing</option><option value="worked" ${r.status==="worked"?"selected":""}>Worked</option><option value="absent" ${r.status==="absent"?"selected":""}>Absent</option></select></td><td><input type="number" min="0" step="0.5" value="${r.overtime}" ${locked?"disabled":""} onchange="changeOvertime('${date}',${w.id},this.value)"></td><td>${money(ot)}</td><td><strong>${money(total)}</strong></td><td>${verifyCell}</td></tr>`;
- }).join(''):'<tr><td colspan="9"><div class="empty">No workers match this view.</div></td></tr>';
- document.getElementById("workedCount").textContent=worked;
- document.getElementById("absentCount").textContent=absent;
- document.getElementById("missingCount").textContent=missing;
- document.getElementById("overtimeCount").textContent=overtime;
- const uv=document.getElementById("unverifiedCount");if(uv)uv.textContent=unverified;
+ const grouped=new Map();
+ pageRows.forEach(({w,r})=>{
+   const batchName=(r.batchName&&String(r.batchName).trim())||'Default';
+   const group=grouped.get(batchName)||{batchName,submittedAt:null,submittedByName:null,records:[]};
+   if(r.submittedAt||r.submittedByName||r.supervisorId){
+     group.submittedAt = group.submittedAt || r.submittedAt || day.submittedAt || null;
+     group.submittedByName = group.submittedByName || r.submittedByName || null;
+   }
+   group.records.push({w,r});
+   grouped.set(batchName,group);
+ });
+ const hasSubmittedGroups = [...grouped.values()].some(group => group.submittedAt || group.submittedByName);
+ table.innerHTML=pageRows.length
+  ? [...grouped.entries()].map(([batchName,group])=>{
+      const records=group.records;
+      const meta = group.submittedAt || group.submittedByName
+        ? `<div class="attendance-batch-meta"><strong>${esc(batchName)}</strong><span>Submitted ${formatDateTime(group.submittedAt)}</span><span>by ${esc(group.submittedByName || 'Supervisor')}</span></div>`
+        : `<div class="attendance-batch-meta"><strong>${esc(batchName)}</strong><span>Approved batch</span></div>`;
+      const header = hasSubmittedGroups ? `<tr class="attendance-batch-header"><td colspan="9">${meta}</td></tr>` : '';
+      const body = records.map(({w,r})=>{
+        const regular=r.status==="worked"?w.rate:0,ot=Number(r.overtime||0)*w.otRate,total=regular+ot;
+        const canVerify=canVerifyAttendance()&&!locked&&(r.status==="worked"||r.status==="present")&&r.verification_status!=='verified';
+        const verifyCell=verificationBadge(r)+(canVerify?` <button class="success" onclick="verifyAttendanceRecord('${date}',${w.id})">Verify</button>`:'');
+        return `<tr><td><strong>${esc(w.name)}</strong><br><small class="muted">${esc(w.employeeNo)}</small></td><td>${esc(w.department)}</td><td>${esc(w.classification)}</td><td>${money(w.rate)}</td><td><select ${locked?"disabled":""} onchange="changeAttendanceStatus('${date}',${w.id},this.value)"><option value="pending" ${r.status==="pending"?"selected":""}>Missing</option><option value="worked" ${r.status==="worked"?"selected":""}>Worked</option><option value="absent" ${r.status==="absent"?"selected":""}>Absent</option></select></td><td><input type="number" min="0" step="0.5" value="${r.overtime}" ${locked?"disabled":""} onchange="changeOvertime('${date}',${w.id},this.value)"></td><td>${money(ot)}</td><td><strong>${money(total)}</strong></td><td>${verifyCell}</td></tr>`;
+      }).join('');
+      return header + body;
+    }).join('')
+  : '<tr><td colspan="9"><div class="empty">No approved workers match this view.</div></td></tr>';
+ if(workedEl)workedEl.textContent=worked;
+ if(absentEl)absentEl.textContent=absent;
+ if(missingEl)missingEl.textContent=missing;
+ if(overtimeEl)overtimeEl.textContent=overtime;
+ if(uvEl)uvEl.textContent=unverified;
  lfRenderPager('attendancePager','attendance','workers');
 }
 function changeAttendanceStatus(date,id,status){const day=getDayRecord(date);if(day.submitted||day.approved)return;const r=getAttendance(date,id);r.status=status;if(status!=='worked'&&status!=='present'){r.verification_status='unverified';r.verified_by_name=null;r.verified_at=null;}markAttendanceDirtyDate(date);saveData();renderAttendance()}
@@ -439,7 +479,15 @@ Verified attendance is required before approval. Use "Verify Remaining" to verif
 
 /* ---------- workers (paginated bulk view) ---------- */
 function renderWorkers(){renderWorkersBulk();}
-function visibleWorkers(){const search=(document.getElementById("workerSearch")?.value||"").toLowerCase(),department=document.getElementById("workerDepartmentFilter")?.value||"all";return workers.filter(w=>(w.name||"").toLowerCase().includes(search)||(w.employeeNo||"").toLowerCase().includes(search)||(w.idNumber||"").toLowerCase().includes(search)).filter(w=>department==="all"||w.department===department)}
+function visibleWorkers(){
+ const search=(document.getElementById("workerSearch")?.value||"").trim().toLowerCase();
+ const department=document.getElementById("workerDepartmentFilter")?.value||"all";
+ return workers.filter(w=>{
+  const haystack=[w.name,w.employeeNo,w.idNumber,w.department,w.designation,w.classification,w.client,w.assignment].join(' ').toLowerCase();
+  const matches=!search||haystack.includes(search);
+  return matches && (department==="all"||w.department===department);
+ });
+}
 function renderWorkersBulk(){
  const table=document.getElementById("workersTable");if(!table)return;
  const rows=visibleWorkers();
@@ -462,11 +510,18 @@ function renderWorkersBulk(){
  lfRenderPager('workersPager','workers','workers');
  updateWorkerSelection();
 }
-function deleteWorker(id){
+async function deleteWorker(id){
  if(!canManageWorkerMasterData()){showToast("Only accountant / HR can delete workers.");return;}
  const w=workers.find(x=>Number(x.id)===Number(id));if(!w)return;
- if(!confirm(`Delete ${w.employeeNo} — ${w.name} permanently? Their attendance history and deployments will be removed too.`))return;
- cloudDeleteWorker(id);
+ if(!confirm(`Delete ${w.employeeNo} — ${w.name}? Their attendance history and deployments will be removed from active records and moved to the recycle bin for super admin restore.`))return;
+ try{
+   await cloudDeleteWorker(id);
+ }catch(error){
+   console.warn('[LF] cloudDeleteWorker failed:',error);
+   showToast(`Worker "${w.employeeNo}" could not be deleted from the cloud. Please retry after reconnecting.`);
+   return;
+ }
+ addRecycleBinItem('worker',w);
  workers=workers.filter(x=>Number(x.id)!==Number(id));
  Object.keys(attendance).forEach(date=>{const day=attendance[date];if(day&&day.records)delete day.records[id];});
  if(typeof deployments!=='undefined'&&Array.isArray(deployments))deployments=deployments.filter(d=>Number(d.workerId)!==Number(id));
@@ -477,9 +532,9 @@ function deleteWorker(id){
  if(typeof audit==='function')audit('Worker deleted',w.employeeNo,w.name);
  saveData();if(typeof saveAdvanced==='function')saveAdvanced();
  renderWorkers();rerenderIfActive('departments');rerenderIfActive('availability');
- showToast(`${w.employeeNo} deleted.`);
+ showToast(`${w.employeeNo} deleted and moved to the super admin recycle bin.`);
 }
-async function hardDeleteWorker(id){if(!isSuperAdmin()){showToast("Only super admin can permanently delete workers from cloud.");return;}const w=workers.find(x=>Number(x.id)===Number(id));if(!w)return;if(!confirm(`PERMANENTLY delete worker ${w.employeeNo} — ${w.name} from cloud database? This removes their attendance history and deployments too. This cannot be undone.`))return;await cloudDeleteWorker(id);workers=workers.filter(x=>Number(x.id)!==Number(id));Object.keys(attendance).forEach(date=>{const day=attendance[date];if(day&&day.records)delete day.records[id];});if(typeof deployments!=='undefined'&&Array.isArray(deployments))deployments=deployments.filter(d=>Number(d.workerId)!==Number(id));if(typeof jtsState!=="undefined"){jtsState.corrections=jtsState.corrections.filter(c=>Number(c.workerId)!==Number(id));jtsState.disputes=jtsState.disputes.filter(c=>Number(c.workerId)!==Number(id));}if(typeof audit==='function')audit('Worker hard-deleted from cloud',w.employeeNo,w.name);saveData();if(typeof saveAdvanced==='function')saveAdvanced();renderWorkers();rerenderIfActive('departments');rerenderIfActive('availability');showToast(`${w.employeeNo} permanently deleted from cloud.`);}
+async function hardDeleteWorker(id){if(!isSuperAdmin()){showToast("Only super admin can permanently delete workers from cloud.");return;}const w=workers.find(x=>Number(x.id)===Number(id));if(!w)return;if(!confirm(`Delete worker ${w.employeeNo} — ${w.name} from active records and move it to the recycle bin for later restore?`))return;await cloudDeleteWorker(id);addRecycleBinItem('worker',w);workers=workers.filter(x=>Number(x.id)!==Number(id));Object.keys(attendance).forEach(date=>{const day=attendance[date];if(day&&day.records)delete day.records[id];});if(typeof deployments!=='undefined'&&Array.isArray(deployments))deployments=deployments.filter(d=>Number(d.workerId)!==Number(id));if(typeof jtsState!=="undefined"){jtsState.corrections=jtsState.corrections.filter(c=>Number(c.workerId)!==Number(id));jtsState.disputes=jtsState.disputes.filter(c=>Number(c.workerId)!==Number(id));}if(typeof audit==='function')audit('Worker moved to recycle bin',w.employeeNo,w.name);saveData();if(typeof saveAdvanced==='function')saveAdvanced();renderWorkers();rerenderIfActive('departments');rerenderIfActive('availability');showToast(`${w.employeeNo} moved to the super admin recycle bin.`);}
 function updateWorkerSelection(){const selected=document.querySelectorAll(".worker-select:checked").length,count=document.getElementById("workerSelectionCount");if(count)count.textContent=`${selected} selected`;}
 function toggleAllWorkers(checked){document.querySelectorAll(".worker-select").forEach(input=>input.checked=checked);updateWorkerSelection();}
 function applyWorkerBulkAction(){if(!canManageWorkerMasterData()){showToast("Only accountant / HR can apply worker changes.");return;}const ids=[...document.querySelectorAll(".worker-select:checked")].map(input=>Number(input.value)),action=document.getElementById("workerBulkAction")?.value;if(!ids.length){showToast("Select at least one worker.");return;}if(!action){showToast("Choose a bulk action first.");return;}let value;if(action==='delete'){if(!confirm(`Delete ${ids.length} worker(s) permanently? This removes their attendance history too.`))return;const idSet=new Set(ids);workers=workers.filter(w=>!idSet.has(Number(w.id)));Object.keys(attendance).forEach(date=>{const day=attendance[date];if(day&&day.records){ids.forEach(id=>{delete day.records[id];});}});if(typeof deployments==='object'&&Array.isArray(deployments))deployments=deployments.filter(d=>!idSet.has(Number(d.workerId)));saveData();if(typeof saveAdvanced==='function')saveAdvanced();renderWorkers();showToast(`Deleted ${ids.length} worker(s).`);return;}if(action==='department'){value=prompt(`Move ${ids.length} worker(s) to which department?`,departments[0]?.name||'');if(value===null)return;value=value.trim();if(!departments.some(d=>d.name.toLowerCase()===value.toLowerCase())){showToast("Department not found. Add it first.");return;}ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w)w.department=value;});}else if(action==='designation'){value=prompt(`Assign which designation to ${ids.length} worker(s)?`,"");if(value===null||!value.trim())return;ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w)w.designation=value.trim();});}else if(action==='rates'){const rate=prompt('Daily rate (KSh):','');if(rate===null)return;const otRate=prompt('OT hourly rate (KSh):','');if(otRate===null)return;if(Number(rate)<=0||Number(otRate)<=0){showToast('Rates must be greater than zero.');return;}ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w){w.rate=Number(rate);w.otRate=Number(otRate);}});}else ids.forEach(id=>{const w=workers.find(worker=>Number(worker.id)===id);if(w)w.active=action==='activate';});saveData();renderWorkers();showToast(`Updated ${ids.length} worker(s).`);}
@@ -491,17 +546,97 @@ function openDeploymentModal(id){ensureModal('deploymentModal');const w=workers.
 function saveDeployment(){const id=Number(document.getElementById("deploymentWorkerId").value),w=workers.find(x=>x.id===id),clientId=Number(document.getElementById("deploymentClient").value),department=document.getElementById("deploymentDepartment").value,start=document.getElementById("deploymentStartDate").value,assignment=document.getElementById("deploymentAssignment").value.trim(),requestId=Number(document.getElementById("deploymentRequest").value)||null;if(!w||!clientId||!department||!start){alert("Select a client, department and start date.");return}w.client=clientById(clientId)?.name||"";w.department=department;w.assignment=assignment||"Direct deployment";w.deploymentStart=start;if(requestId){const r=requestById(requestId);if(r&&!r.allocatedWorkerIds.includes(w.id))r.allocatedWorkerIds.push(w.id);if(r&&r.allocatedWorkerIds.length)r.status="Allocated"}saveData();closeModal("deploymentModal");renderWorkers();showToast(`${w.employeeNo} deployed successfully.`)}
 
 /* ---------- clients / departments ---------- */
-function cloudDeleteClient(id){const remoteId=clientRemote(id);if(!remoteId)return Promise.resolve();return labourForceSupabase.from('clients').delete().eq('id',remoteId).then(({error})=>{if(error)console.warn('[LF] cloudDeleteClient:',error.message);});}
-function cloudDeleteDepartment(name){const remoteId=deptRemote(name);return cloudDeleteDepartmentRemote(remoteId);}
-function cloudDeleteDepartmentRemote(remoteId){if(!remoteId||!labourForceSupabase)return Promise.resolve();return labourForceSupabase.from('departments').delete().eq('id',remoteId).then(({error})=>{if(error)console.warn('[LF] cloudDeleteDepartment:',error.message);});}
-function cloudDeleteWorker(id){const remoteId=workerRemote(id);if(!remoteId)return Promise.resolve();return labourForceSupabase.from('workers').delete().eq('id',remoteId).then(({error})=>{if(error)console.warn('[LF] cloudDeleteWorker:',error.message);});}
-async function hardDeleteClient(id){if(!isSuperAdmin()){showToast("Only super admin can permanently delete clients.");return;}const c=clientById(id);if(!c)return;if(!confirm(`PERMANENTLY delete client "${c.name}" from cloud database? This cannot be undone.`))return;await cloudDeleteClient(id);clients=clients.filter(x=>x.id!==id);saveData();populateClientSelects();renderClients();showToast(`Client "${c.name}" deleted from cloud.`);}
+async function cloudDeleteClient(id){
+ const c=clientById(id);
+ const name=(c?.name||'').trim();
+ if(!labourForceSupabase)return;
+ if(name){
+   const {data,error}=await labourForceSupabase.from('clients').select('id').eq('name', name).limit(1);
+   if(error){console.warn('[LF] cloudDeleteClient:',error.message);throw error;}
+   if(data && data.length){
+     const {error:deleteError}=await labourForceSupabase.from('clients').delete().eq('id', data[0].id);
+     if(deleteError){console.warn('[LF] cloudDeleteClient:',deleteError.message);throw deleteError;}
+     return;
+   }
+ }
+ const remoteId=clientRemote(id);
+ if(remoteId){
+   const {error}=await labourForceSupabase.from('clients').delete().eq('id', remoteId);
+   if(error){console.warn('[LF] cloudDeleteClient:',error.message);throw error;}
+ }
+}
+async function cloudDeleteDepartment(name){
+ if(!labourForceSupabase)return;
+ const trimmed=String(name||'').trim();
+ if(!trimmed)return;
+ const {data,error}=await labourForceSupabase.from('departments').select('id').eq('name', trimmed).limit(1);
+ if(error){console.warn('[LF] cloudDeleteDepartment:',error.message);throw error;}
+ if(data && data.length){
+   const {error:deleteError}=await labourForceSupabase.from('departments').delete().eq('id', data[0].id);
+   if(deleteError){console.warn('[LF] cloudDeleteDepartment:',deleteError.message);throw deleteError;}
+   return;
+ }
+ const remoteId=deptRemote(trimmed);
+ if(remoteId){
+   const {error:deleteError}=await labourForceSupabase.from('departments').delete().eq('id', remoteId);
+   if(deleteError){console.warn('[LF] cloudDeleteDepartment:',deleteError.message);throw deleteError;}
+ }
+}
+function cloudDeleteDepartmentRemote(remoteId){if(!remoteId||!labourForceSupabase)return Promise.resolve();return labourForceSupabase.from('departments').delete().eq('id',remoteId).then(({error})=>{if(error){console.warn('[LF] cloudDeleteDepartment:',error.message);throw error;} });}
+async function cloudDeleteWorker(id){
+ const w=workers.find(x=>Number(x.id)===Number(id));
+ if(!labourForceSupabase)return;
+ const identityCandidates=[];
+ if(w){
+   if(w.employeeNo)identityCandidates.push({field:'employee_no',value:w.employeeNo});
+   if(w.idNumber)identityCandidates.push({field:'id_number',value:w.idNumber});
+   if(w.nationalId)identityCandidates.push({field:'id_number',value:w.nationalId});
+ }
+ for(const candidate of identityCandidates){
+   const {data,error}=await labourForceSupabase.from('workers').select('id').eq(candidate.field, candidate.value).limit(1);
+   if(error){console.warn('[LF] cloudDeleteWorker:',error.message);throw error;}
+   if(data && data.length){
+     const {error:deleteError}=await labourForceSupabase.from('workers').delete().eq('id', data[0].id);
+     if(deleteError){console.warn('[LF] cloudDeleteWorker:',deleteError.message);throw deleteError;}
+     return;
+   }
+ }
+ const remoteId=workerRemote(id);
+ if(remoteId){
+   const {error}=await labourForceSupabase.from('workers').delete().eq('id', remoteId);
+   if(error){console.warn('[LF] cloudDeleteWorker:',error.message);throw error;}
+ }
+}
+async function hardDeleteClient(id){if(!isSuperAdmin()){showToast("Only super admin can permanently delete clients.");return;}const c=clientById(id);if(!c)return;if(!confirm(`Delete client "${c.name}" from active records and move it to the recycle bin for later restore?`))return;await cloudDeleteClient(id);addRecycleBinItem('client',c);clients=clients.filter(x=>x.id!==id);saveData();populateClientSelects();renderClients();showToast(`Client "${c.name}" moved to the super admin recycle bin.`);}
 function renderClients(){const table=document.getElementById("clientsTable");if(!table)return;const isSA=isSuperAdmin();table.innerHTML=clients.map(c=>{const reqs=labourRequests.filter(r=>r.clientId===c.id&&!['Completed','Cancelled'].includes(r.status));const allocated=new Set(reqs.flatMap(r=>r.allocatedWorkerIds||[])).size;const actions=isSA?`<button class="secondary" onclick="editClient(${c.id})">Edit</button> <button class="danger" onclick="hardDeleteClient(${c.id})">Delete</button>`:`<button class="secondary" onclick="editClient(${c.id})">Edit</button> <button class="${c.active?"danger":"success"}" onclick="toggleClient(${c.id})">${c.active?"Deactivate":"Activate"}</button>`;return `<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.contact||"—")}</td><td>${esc(c.phone||"—")}</td><td>${reqs.length}</td><td>${allocated}</td><td><span class="status ${c.active?"status-worked":"status-absent"}">${c.active?"Active":"Inactive"}</span></td><td>${actions}</td></tr>`}).join('')||'<tr><td colspan="7"><div class="empty">No clients yet.</div></td></tr>'}
 function openClientModal(){ensureModal('clientModal');document.getElementById("editingClientId").value="";document.getElementById("clientModalTitle").textContent="Add Client";document.getElementById("clientName").value="";document.getElementById("clientContact").value="";document.getElementById("clientPhone").value="";document.getElementById("clientModal").classList.add("show")}
 function editClient(id){ensureModal('clientModal');const c=clientById(id);if(!c)return;openClientModal();document.getElementById("editingClientId").value=id;document.getElementById("clientModalTitle").textContent="Edit Client";document.getElementById("clientName").value=c.name;document.getElementById("clientContact").value=c.contact||"";document.getElementById("clientPhone").value=c.phone||""}
 function saveClient(){const id=document.getElementById("editingClientId").value,name=document.getElementById("clientName").value.trim(),contact=document.getElementById("clientContact").value.trim(),phone=document.getElementById("clientPhone").value.trim();if(!name){alert("Enter the company name.");return}if(id){const c=clientById(id);Object.assign(c,{name,contact,phone});showToast("Client updated.")}else{clients.push({id:Date.now(),name,contact,phone,active:true});showToast("Client added.")}saveData();closeModal("clientModal");populateClientSelects();renderClients()}
 function toggleClient(id){const c=clientById(id);if(!c)return;c.active=!c.active;saveData();populateClientSelects();renderClients();showToast(c.active?`${c.name} activated.`:`${c.name} deactivated.`)}
-function renderDepartments(){const table=document.getElementById("departmentsTable");if(!table)return;const canEdit=canManageWorkerMasterData();const isSA=isSuperAdmin();table.innerHTML=departments.map((d,i)=>{const count=workers.filter(w=>w.active&&w.department===d.name).length;const actions=isSA?`<button class="secondary" onclick="editDepartment(${i})">Edit</button> <button class="danger" onclick="hardDeleteDepartment(${i})">Delete</button>`:canEdit?`<button class="secondary" onclick="editDepartment(${i})">Edit</button> <button class="danger" onclick="deleteDepartment(${i})">Delete</button>`:'—';return `<tr><td><strong>${esc(d.name)}</strong></td><td>${esc(d.parent||"—")}</td><td>${count}</td><td>${d.rate?money(d.rate):'Worker rate'}</td><td>${d.otRate?money(d.otRate):'Worker rate'}</td><td>${actions}</td></tr>`}).join('')||'<tr><td colspan="6"><div class="empty">No departments yet.</div></td></tr>'}
+function renderDepartments(){const table=document.getElementById("departmentsTable");if(!table)return;const canEdit=canManageWorkerMasterData();const isSA=isSuperAdmin();table.innerHTML=departments.map((d,i)=>{const count=workers.filter(w=>w.active&&w.department===d.name).length;const actions=isSA?`<button class="secondary" onclick="editDepartment(${i})">Edit</button> <button class="danger" onclick="hardDeleteDepartment(${i})">Delete</button>`:canEdit?`<button class="secondary" onclick="editDepartment(${i})">Edit</button> <button class="danger" onclick="deleteDepartment(${i})">Delete</button>`:'—';return `<tr><td><input type="checkbox" class="department-select" value="${i}" onchange="updateDepartmentSelection()"></td><td><strong>${esc(d.name)}</strong></td><td>${esc(d.parent||"—")}</td><td>${count}</td><td>${d.rate?money(d.rate):'Worker rate'}</td><td>${d.otRate?money(d.otRate):'Worker rate'}</td><td>${actions}</td></tr>`}).join('')||'<tr><td colspan="7"><div class="empty">No departments yet.</div></td></tr>';
+updateDepartmentSelection();renderRecycleBin();}
+function getRecycleBin(){
+  try{
+    const items=JSON.parse(localStorage.getItem('labourforce_master_recycle_bin')||'[]');
+    if(Array.isArray(items)&&items.length)return items;
+  }catch(_){ }
+  try{
+    const legacy=JSON.parse(localStorage.getItem('labourforce_department_recycle_bin')||'[]');
+    if(Array.isArray(legacy)&&legacy.length){
+      return legacy.map(item=>({id:item.id||Date.now()+Math.random(),type:'department',deletedAt:item.deletedAt||new Date().toISOString(),record:item.department||item.record||{}}));
+    }
+  }catch(_){ }
+  return [];
+}
+function saveRecycleBin(items){localStorage.setItem('labourforce_master_recycle_bin',JSON.stringify(items));}
+function addRecycleBinItem(type,record){const items=getRecycleBin();items.unshift({id:Date.now()+Math.random(),type,deletedAt:new Date().toISOString(),record:{...record}});saveRecycleBin(items.slice(0,500));}
+function addDepartmentToRecycleBin(record){addRecycleBinItem('department', record);}
+function renderRecycleBin(){const section=document.getElementById('departmentRecycleBinSection');const table=document.getElementById('departmentRecycleBinTable');if(!section||!table)return;const isSA=isSuperAdmin();section.style.display=isSA?'block':'none';if(!isSA){table.innerHTML='';return;}const items=getRecycleBin();table.innerHTML=items.length?items.map((item,index)=>{const name=item.record?.name||item.record?.employeeNo||item.record?.clientName||'Item';const details=item.type==='department'?`${esc(item.record.parent||'—')} · ${esc(item.record.rate?money(item.record.rate):'Worker rate')} / ${esc(item.record.otRate?money(item.record.otRate):'Worker rate')}`:item.type==='worker'?`${esc(item.record.employeeNo||'')} · ${esc(item.record.department||'Unassigned')}`:item.type==='client'?`${esc(item.record.contact||'—')} · ${esc(item.record.phone||'—')}`:'—';return `<tr><td>${esc(item.type.toUpperCase())}</td><td>${esc(name)}</td><td>${details}</td><td>${esc(formatDateTime(item.deletedAt))}</td><td><button class="secondary" onclick="restoreRecycleItem(${index})">Restore</button></td></tr>`;}).join(''):'<tr><td colspan="5"><div class="empty">Recycle bin is empty.</div></td></tr>';}
+function restoreRecycleItem(index){const items=getRecycleBin();const item=items[index];if(!item||!item.record)return;const type=item.type;const record={...item.record};if(type==='department'){const exists=departments.some(d=>d.name.toLowerCase()===String(record.name||'').toLowerCase());if(exists){showToast(`Department "${record.name}" already exists.`);return;}departments.push(record);items.splice(index,1);saveRecycleBin(items);saveData();populateFilters();renderDepartments();renderWorkers();showToast(`Department "${record.name}" restored.`);return;}if(type==='worker'){const exists=workers.some(w=>Number(w.id)===Number(record.id));if(exists){showToast(`Worker "${record.name}" already exists.`);return;}workers.push(record);items.splice(index,1);saveRecycleBin(items);saveData();renderWorkers();rerenderIfActive('departments');showToast(`Worker "${record.name}" restored.`);return;}if(type==='client'){const exists=clients.some(c=>Number(c.id)===Number(record.id));if(exists){showToast(`Client "${record.name}" already exists.`);return;}clients.push(record);items.splice(index,1);saveRecycleBin(items);saveData();populateClientSelects();renderClients();showToast(`Client "${record.name}" restored.`);return;}}
+function updateDepartmentSelection(){const selected=document.querySelectorAll(".department-select:checked").length,count=document.getElementById("departmentSelectionCount");if(count)count.textContent=`${selected} selected`;const all=document.getElementById("selectAllDepartments");if(all)all.checked=document.querySelectorAll(".department-select").length>0&&document.querySelectorAll(".department-select").length===selected;}
+function toggleAllDepartments(checked){document.querySelectorAll(".department-select").forEach(input=>input.checked=checked);updateDepartmentSelection();}
+function openWorkerModalForSelectedDepartment(){const checked=[...document.querySelectorAll(".department-select:checked")];if(!checked.length){showToast("Select a department first.");return;}const target=departments[Number(checked[0].value)];if(!target){showToast("Selected department not found.");return;}openWorkerModal();setTimeout(()=>{const el=document.getElementById("workerDepartment");if(el)el.value=target.name;},0);}
+async function applyDepartmentBulkAction(){if(!canManageWorkerMasterData()){showToast("Only accountant / HR can apply department bulk changes.");return;}const selected=[...document.querySelectorAll(".department-select:checked")].map(input=>Number(input.value));if(!selected.length){showToast("Select at least one department.");return;}const action=document.getElementById("departmentBulkAction")?.value;if(!action){showToast("Choose a bulk action first.");return;}if(action==='rates'){const dailyRate=prompt('Set the same daily wage for selected departments (KSh):','');if(dailyRate===null)return;const otRate=prompt('Set the same OT wage for selected departments (KSh):','');if(otRate===null)return;const rate=Number(dailyRate)||0;const overtime=Number(otRate)||0;if(rate<=0||overtime<=0){showToast("Rates must be greater than zero.");return;}selected.forEach(index=>{const d=departments[index];if(d){d.rate=rate;d.otRate=overtime;}});saveData();populateFilters();renderDepartments();renderWorkers();showToast(`Updated rates for ${selected.length} department(s).`);return;}if(action==='parent'){const parent=prompt('Set a parent department for the selected departments (leave blank for none):','');if(parent===null)return;const value=parent.trim();selected.forEach(index=>{const d=departments[index];if(d){d.parent=value||"";}});saveData();populateFilters();renderDepartments();showToast(`Updated parent department for ${selected.length} department(s).`);return;}if(action==='move-workers'){const checkedNames=selected.map(index=>departments[index]?.name).filter(Boolean);if(!checkedNames.length){showToast("No departments selected.");return;}const targetName=prompt(`Move all workers currently in ${checkedNames.length} selected department(s) to which department?`, departments[0]?.name||'');if(targetName===null)return;const normalizedTarget=targetName.trim();if(!normalizedTarget){showToast("Choose a target department.");return;}const targetDepartment=departments.find(d=>d.name.toLowerCase()===normalizedTarget.toLowerCase());if(!targetDepartment){showToast("Target department not found. Add it first.");return;}const movedWorkers=[];workers.forEach(w=>{if(checkedNames.some(name=>name===w.department)){w.department=targetDepartment.name;movedWorkers.push(w.name||w.employeeNo||String(w.id));}});if(typeof deployments!=='undefined'&&Array.isArray(deployments))deployments.forEach(dep=>{if(checkedNames.some(name=>name===dep.department))dep.department=targetDepartment.name;});saveData();if(typeof saveAdvanced==='function')saveAdvanced();populateFilters();renderDepartments();renderWorkers();rerenderIfActive('availability');showToast(`Moved ${movedWorkers.length} worker(s) into ${targetDepartment.name}.`);return;}if(action==='delete'){const names=selected.map(index=>departments[index]?.name).filter(Boolean);if(!names.length){showToast("No departments to delete.");return;}if(!confirm(`Delete ${names.length} selected department(s)? This will clear the department on all workers and deployments.`))return;for(const index of selected){const d=departments[index];if(!d)continue;try{await cloudDeleteDepartment(d.name);}catch(error){console.warn('[LF] bulk cloud delete failed for department',d.name,error);showToast(`Department "${d.name}" could not be deleted from the cloud. Stopping the bulk delete.`);return;}}const toDelete=new Set(selected.map(index=>departments[index]?.name).filter(Boolean));workers.forEach(w=>{if(toDelete.has(w.department))w.department="";});if(typeof deployments!=='undefined'&&Array.isArray(deployments))deployments.forEach(dep=>{if(toDelete.has(dep.department))dep.department="";});departments=departments.filter((d,index)=>!selected.includes(index));if(typeof audit==='function')audit('Bulk departments deleted',names.join(', '),'' );saveData();if(typeof saveAdvanced==='function')saveAdvanced();populateFilters();renderDepartments();renderWorkers();rerenderIfActive('availability');showToast(`Deleted ${names.length} department(s).`);return;}showToast("Unsupported bulk action.");}
 function openDepartmentModal(){ensureModal('departmentModal');document.getElementById("departmentModalTitle").textContent="Add Department";document.getElementById("departmentOriginalName").value="";populateFilters();document.getElementById("departmentName").value="";document.getElementById("departmentRate").value="";document.getElementById("departmentOtRate").value="";document.getElementById("departmentModal").classList.add("show")}
 function editDepartment(index){
  if(!canManageWorkerMasterData()){showToast("Only accountant / HR can edit department master data.");return;}
@@ -537,22 +672,29 @@ function saveDepartment(){
  else{departments.push({name,parent,rate,otRate});showToast("Department added.")}
  saveData();if(original&&original!==name)cloudDeleteDepartmentRemote(oldRemoteId);closeModal("departmentModal");populateFilters();renderDepartments();renderWorkers();
 }
-function deleteDepartment(index){
+async function deleteDepartment(index){
  if(!canManageWorkerMasterData()){showToast("Only accountant / HR can delete departments.");return;}
  const d=departments[index];if(!d)return;
  const activeWorkers=workers.filter(w=>w.active&&w.department===d.name);
  if(activeWorkers.length&&!confirm(`${activeWorkers.length} active worker(s) belong to "${d.name}". Delete anyway? Their department will be cleared.`))return;
  if(!confirm(`Delete department "${d.name}" permanently?`))return;
- cloudDeleteDepartment(d.name);
+ try{
+   await cloudDeleteDepartment(d.name);
+ }catch(error){
+   console.warn('[LF] cloudDeleteDepartment failed:',error);
+   showToast(`Department "${d.name}" could not be deleted from the cloud. Please retry after reconnecting.`);
+   return;
+ }
  workers.forEach(w=>{if(w.department===d.name)w.department="";});
  if(typeof deployments!=='undefined'&&Array.isArray(deployments))deployments.forEach(dep=>{if(dep.department===d.name)dep.department="";});
+ addDepartmentToRecycleBin(d);
  departments=departments.filter(x=>x!==d);
  if(typeof audit==='function')audit('Department deleted',d.name,'');
  saveData();if(typeof saveAdvanced==='function')saveAdvanced();
  populateFilters();renderDepartments();renderWorkers();rerenderIfActive('availability');
- showToast(`Department ${d.name} deleted.`);
+ showToast(`Department ${d.name} deleted. It is now in the super admin recycle bin.`);
 }
-async function hardDeleteDepartment(index){if(!isSuperAdmin()){showToast("Only super admin can permanently delete departments from cloud.");return;}const d=departments[index];if(!d)return;const activeWorkers=workers.filter(w=>w.active&&w.department===d.name);if(activeWorkers.length&&!confirm(`${activeWorkers.length} active worker(s) belong to "${d.name}". Delete anyway? Their department will be cleared.`))return;if(!confirm(`PERMANENTLY delete department "${d.name}" from cloud database? This cannot be undone.`))return;await cloudDeleteDepartment(d.name);workers.forEach(w=>{if(w.department===d.name)w.department="";});if(typeof deployments!=='undefined'&&Array.isArray(deployments))deployments.forEach(dep=>{if(dep.department===d.name)dep.department="";});departments=departments.filter(x=>x!==d);if(typeof audit==='function')audit('Department hard-deleted from cloud',d.name,'');saveData();if(typeof saveAdvanced==='function')saveAdvanced();populateFilters();renderDepartments();renderWorkers();rerenderIfActive('availability');showToast(`Department "${d.name}" permanently deleted from cloud.`);}
+async function hardDeleteDepartment(index){if(!isSuperAdmin()){showToast("Only super admin can permanently delete departments from cloud.");return;}const d=departments[index];if(!d)return;const activeWorkers=workers.filter(w=>w.active&&w.department===d.name);if(activeWorkers.length&&!confirm(`${activeWorkers.length} active worker(s) belong to "${d.name}". Delete anyway? Their department will be cleared.`))return;if(!confirm(`Delete department "${d.name}" from active records and move it to the recycle bin for later restore?`))return;try{await cloudDeleteDepartment(d.name);}catch(error){console.warn('[LF] cloudDeleteDepartment failed:',error);showToast(`Department "${d.name}" could not be deleted from the cloud. Please retry after reconnecting.`);return;}workers.forEach(w=>{if(w.department===d.name)w.department="";});if(typeof deployments!=='undefined'&&Array.isArray(deployments))deployments.forEach(dep=>{if(dep.department===d.name)dep.department="";});addDepartmentToRecycleBin(d);departments=departments.filter(x=>x!==d);if(typeof audit==='function')audit('Department moved to recycle bin',d.name,'');saveData();if(typeof saveAdvanced==='function')saveAdvanced();populateFilters();renderDepartments();renderWorkers();rerenderIfActive('availability');showToast(`Department "${d.name}" moved to the super admin recycle bin.`);}
 
 /* ---------- payroll (memoized + paginated) ---------- */
 let lfPayrollCache={key:'',result:null};
@@ -598,6 +740,20 @@ function renderReports(){
  const rd=document.getElementById("reportDepartments");if(rd)rd.textContent=departments.length;
  const d=attendance[today()];
  const ra=document.getElementById("reportAttendance");if(ra)ra.textContent=d?.approved?"Approved":d?.submitted?"Submitted":"Pending";
+ const approvedDays=Object.entries(attendance)
+   .filter(([date,day])=>day&&day.approved)
+   .sort((a,b)=>b[0].localeCompare(a[0]));
+ const table=document.getElementById("approvedHistoryTable");
+ if(table){
+   table.innerHTML=approvedDays.length?approvedDays.map(([date,day])=>{
+     const records=Object.values(day.records||{}).filter(r=>r&&['worked','present','absent'].includes(r.status));
+     const attended=records.filter(r=>r.status==='worked'||r.status==='present').length;
+     const batches=[...new Set(Object.values(day.records||{}).map(r=>r&&r.batchName).filter(Boolean))];
+     const totalOt=records.reduce((sum,r)=>sum+Number(r.overtime||0),0);
+     const approvedBy=Object.values(day.records||{}).find(r=>r&&r.submittedByName)?.submittedByName || 'Supervisor';
+     return `<tr><td>${esc(date)}</td><td>${batches.length?batches.map(b=>esc(b)).join(', '):'—'}</td><td>${attended}</td><td>${records.length}</td><td>${totalOt}</td><td>${esc(approvedBy)}</td><td><button class="secondary" onclick="exportApprovedAttendance('${date}')">Export</button></td></tr>`;
+   }).join(''):'<tr><td colspan="7"><div class="empty"><div>No approved attendance history yet.</div><div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center"><a href="supervisor.html" style="display:inline-block;padding:8px 12px;border-radius:10px;background:#10b981;color:#041a2d;text-decoration:none;font-weight:600">Submit via /supervisor</a><a href="index.html#approval" style="display:inline-block;padding:8px 12px;border-radius:10px;background:rgba(148,163,184,.15);color:#e5eefc;text-decoration:none;font-weight:600;border:1px solid rgba(148,163,184,.3)">Approve in /approval</a><a href="index.html#reports" style="display:inline-block;padding:8px 12px;border-radius:10px;background:rgba(148,163,184,.15);color:#e5eefc;text-decoration:none;font-weight:600;border:1px solid rgba(148,163,184,.3)">Open /reports</a></div></div></td></tr>';
+ }
 }
 
 /* ---------- JTS roll call (read-only render, explicit roster) ---------- */
@@ -847,7 +1003,36 @@ function renderWorkerPortal(){
 
 /* ---------- CSV export ---------- */
 function downloadCSV(filename,rows){const csv=rows.map(row=>row.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n");const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url)}
-function exportAttendance(){const date=document.getElementById("attendanceDate").value||today(),rows=[["Employee No.","Worker","Department","Classification","Daily Rate","OT Rate","Status","OT Hours","OT Pay","Total Pay","Verification"]];workers.filter(w=>w.active).forEach(w=>{const r=peekAttendance(date,w.id),reg=r.status==="worked"?w.rate:0,ot=Number(r.overtime||0)*w.otRate;rows.push([w.employeeNo,w.name,w.department,w.classification,w.rate,w.otRate,r.status,r.overtime,ot,reg+ot,r.verification_status||'unverified'])});downloadCSV(`attendance-${date}.csv`,rows)}
+function exportApprovedAttendance(dateOverride){
+ const date=dateOverride||document.getElementById("attendanceDate").value||today();
+ const day=attendance[date];
+ if(!day||!day.approved){
+   showToast('No approved attendance is available for this date yet.');
+   return;
+ }
+ const rows=[["Date","Employee No.","Worker","Department","Classification","Batch","Status","Hours","OT Hours","Verification","Submitted By","Submitted At"]];
+ workers.filter(w=>w.active).forEach(w=>{
+   const r=day.records?.[w.id];
+   if(!r) return;
+   rows.push([
+     date,
+     w.employeeNo,
+     w.name,
+     w.department,
+     w.classification,
+     r.batchName || 'Default',
+     r.status,
+     Number(r.hours||0),
+     Number(r.overtime||0),
+     r.verification_status||'unverified',
+     r.submittedByName || r.submittedById || 'Supervisor',
+     r.submittedAt || day.submittedAt || ''
+   ]);
+ });
+ downloadCSV(`approved-attendance-${date}.csv`,rows);
+ showToast(`Approved attendance exported for ${date}.`);
+}
+function exportAttendance(){exportApprovedAttendance();}
 function exportPayroll(){const rows=[["Worker","Days Worked","Daily Rate","Regular Pay","OT Hours","OT Pay","Gross"]];document.querySelectorAll("#payrollTable tr").forEach(row=>{const cells=[...row.querySelectorAll("td")].map(c=>c.innerText.trim());if(cells.length)rows.push(cells)});downloadCSV("payroll.csv",rows);showToast("Payroll CSV exported.")}
 
 function calculateFairShareAttendance(){
@@ -984,6 +1169,9 @@ LF_PAGER_RERENDER.payroll=()=>renderPayroll();
  function lfRenderInitialPage(){
    if(lfAppRendered)return;
    lfAppRendered=true;
+   if(window.history && window.history.replaceState){
+     try{ window.history.replaceState(null,'',window.location.pathname + window.location.search); }catch(_){ }
+   }
    renderDashboard();
   const hash=(location.hash||'').replace('#','');
   if(hash&&hash!=='dashboard'&&document.getElementById(hash))showPage(hash);

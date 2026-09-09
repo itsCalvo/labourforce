@@ -7,14 +7,14 @@
 
 -- 1) Dimension tables
 create table if not exists public.departments (
-  id bigserial primary key,
+  id uuid primary key default gen_random_uuid(),
   name text not null unique,
   created_at timestamptz not null default now()
 );
 
 create table if not exists public.designations (
-  id bigserial primary key,
-  department_id bigint not null references public.departments(id) on delete restrict,
+  id uuid primary key default gen_random_uuid(),
+  department_id uuid not null references public.departments(id) on delete restrict,
   name text not null,
   rate_day numeric(12,2) not null default 0,
   rate_hour numeric(12,2) not null default 0,
@@ -23,12 +23,12 @@ create table if not exists public.designations (
 );
 
 create table if not exists public.workers (
-  id bigserial primary key,
+  id uuid primary key default gen_random_uuid(),
   staff_no text,
   id_number text not null unique,
   name text not null,
-  department_id bigint references public.departments(id) on delete restrict,
-  designation_id bigint references public.designations(id) on delete restrict,
+  department_id uuid references public.departments(id) on delete restrict,
+  designation_id uuid references public.designations(id) on delete restrict,
   override_rate_day numeric(12,2),
   override_rate_hour numeric(12,2),
   active boolean not null default true,
@@ -41,23 +41,31 @@ create index if not exists workers_designation_idx on public.workers(designation
 
 -- 2) Daily attendance & review
 create table if not exists public.attendance (
-  id bigserial primary key,
-  worker_id bigint not null references public.workers(id) on delete cascade,
+  id uuid primary key default gen_random_uuid(),
+  worker_id uuid not null references public.workers(id) on delete cascade,
   attendance_date date not null,
   status text not null default 'pending' check (status in ('pending','present','absent','approved')),
   hours_worked numeric(6,2) not null default 0,
   overtime_hours numeric(6,2) not null default 0,
   notes text,
+  batch_name text not null default 'Default',
+  supervisor_id uuid references auth.users(id),
+  submitted_by uuid references auth.users(id),
+  submitted_at timestamptz,
   approved_by uuid references auth.users(id),
   approved_at timestamptz,
+  current_stage text default 'supervisor',
+  workflow_status text default 'pending',
+  final_approved_by uuid references auth.users(id),
+  final_approved_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique(worker_id, attendance_date)
 );
 
 create table if not exists public.corrections (
-  id bigserial primary key,
-  worker_id bigint not null references public.workers(id) on delete cascade,
+  id uuid primary key default gen_random_uuid(),
+  worker_id uuid not null references public.workers(id) on delete cascade,
   issue_type text not null,
   issue_text text not null,
   status text not null default 'open' check (status in ('open','in_review','resolved','rejected')),
@@ -68,9 +76,9 @@ create table if not exists public.corrections (
 );
 
 create table if not exists public.disputes (
-  id bigserial primary key,
-  worker_id bigint not null references public.workers(id) on delete cascade,
-  attendance_id bigint references public.attendance(id) on delete cascade,
+  id uuid primary key default gen_random_uuid(),
+  worker_id uuid not null references public.workers(id) on delete cascade,
+  attendance_id uuid references public.attendance(id) on delete cascade,
   dispute_date date not null,
   note text not null,
   status text not null default 'pending' check (status in ('pending','reviewed','resolved')),
@@ -79,8 +87,8 @@ create table if not exists public.disputes (
 );
 
 create table if not exists public.deductions (
-  id bigserial primary key,
-  worker_id bigint not null references public.workers(id) on delete cascade,
+  id uuid primary key default gen_random_uuid(),
+  worker_id uuid not null references public.workers(id) on delete cascade,
   deduction_type text not null check (deduction_type in ('advance','ppe','medical','disciplinary','other')),
   description text not null,
   amount numeric(12,2) not null default 0,
@@ -94,7 +102,7 @@ create table if not exists public.deductions (
 
 -- 3) Payroll and payouts
 create table if not exists public.payroll_periods (
-  id bigserial primary key,
+  id uuid primary key default gen_random_uuid(),
   label text not null,
   period_start date not null,
   period_end date not null,
@@ -104,10 +112,10 @@ create table if not exists public.payroll_periods (
 );
 
 create table if not exists public.payroll_lines (
-  id bigserial primary key,
-  payroll_period_id bigint not null references public.payroll_periods(id) on delete cascade,
-  worker_id bigint not null references public.workers(id) on delete cascade,
-  designation_id bigint references public.designations(id) on delete restrict,
+  id uuid primary key default gen_random_uuid(),
+  payroll_period_id uuid not null references public.payroll_periods(id) on delete cascade,
+  worker_id uuid not null references public.workers(id) on delete cascade,
+  designation_id uuid references public.designations(id) on delete restrict,
   days_worked integer not null default 0,
   normal_hours numeric(6,2) not null default 0,
   overtime_hours numeric(6,2) not null default 0,
@@ -128,8 +136,8 @@ create table if not exists public.payroll_lines (
 );
 
 create table if not exists public.bankfile_exports (
-  id bigserial primary key,
-  payroll_period_id bigint not null references public.payroll_periods(id) on delete restrict,
+  id uuid primary key default gen_random_uuid(),
+  payroll_period_id uuid not null references public.payroll_periods(id) on delete restrict,
   export_name text not null,
   total_amount numeric(12,2) not null default 0,
   status text not null default 'generated' check (status in ('generated','approved','sent')),
@@ -138,9 +146,9 @@ create table if not exists public.bankfile_exports (
 );
 
 create table if not exists public.bankfile_lines (
-  id bigserial primary key,
-  bankfile_export_id bigint not null references public.bankfile_exports(id) on delete cascade,
-  worker_id bigint not null references public.workers(id) on delete restrict,
+  id uuid primary key default gen_random_uuid(),
+  bankfile_export_id uuid not null references public.bankfile_exports(id) on delete cascade,
+  worker_id uuid not null references public.workers(id) on delete restrict,
   account_no text,
   account_name text,
   id_number text,
@@ -153,9 +161,9 @@ create table if not exists public.bankfile_lines (
 create or replace view public.workers_public as
 select
   w.id,
-  w.staff_no,
+  w.employee_no as staff_no,
   w.id_number,
-  w.name,
+  w.full_name as name,
   d.name as department,
   deg.name as designation,
   w.active,
@@ -399,15 +407,14 @@ create or replace view public.attendance_summary as
 select
   a.worker_id,
   a.attendance_date,
-  w.name as worker_name,
+  w.full_name as worker_name,
   w.id_number,
   a.status,
   a.hours_worked,
   a.overtime_hours,
-  case when d.id is not null then d.description else null end as deduction_note
+  null::text as deduction_note
 from public.attendance a
-join public.workers w on w.id = a.worker_id
-left join public.deductions d on d.worker_id = a.worker_id and d.status = 'active';
+join public.workers w on w.id = a.worker_id;
 
 -- 9) Safe monthly re-import expectation
 -- Match on id_number so a worker's historical attendance/payroll rows never

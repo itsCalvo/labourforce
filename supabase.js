@@ -279,10 +279,10 @@ function workerRemote(id){ return id==null ? null : rid('worker',id); }
 function profileId(){ return labourForceSession?.user?.id || null; }
 
 /* PHASE 2: Cloud-authoritative direct-write functions */
-async function lfSaveWorkers(){if(typeof workers=="undefined")return;const{data:ed}=await labourForceSupabase.from("workers").select("id,employee_no,id_number").catch(()=>({data:[]}));const byIdentity=new Map();(ed||[]).forEach(w=>{if(w.employee_no)byIdentity.set('staff:'+String(w.employee_no).trim().toLowerCase(),w.id);if(w.id_number)byIdentity.set('id:'+String(w.id_number).trim().toLowerCase(),w.id);});const rows=workers.map(w=>{const remoteId=byIdentity.get('id:'+String(w.idNumber||w.nationalId||'').trim().toLowerCase())||byIdentity.get('staff:'+String(w.employeeNo||'').trim().toLowerCase())||workerRemote(w.id)||w.id;setRid('worker',w.id,remoteId);return{id:remoteId,employee_no:w.employeeNo,full_name:w.name,phone:w.phone||null,national_id:w.nationalId||w.idNumber||null,id_number:w.idNumber||w.nationalId||null,kra_pin:w.kraPin||null,nssf_number:w.nssfNumber||null,shif_number:w.shifNumber||null,account_number:w.accountNumber||null,department_id:deptRemote(w.department),classification:w.classification||"Unskilled",designation:w.designation||null,daily_rate:Number(w.rate||0),overtime_rate:Number(w.otRate||0),join_date:w.joinDate||null,source_sheet:w.workbookSource||null,active:w.active!==false,notes:w.notes||null};});for(let i=0;i<rows.length;i+=100)await upsertBatch("workers",rows.slice(i,i+100));}
-async function lfSaveClients(){if(typeof clients=="undefined")return;const{data:ed}=await labourForceSupabase.from("clients").select("id,client_code").catch(()=>({data:[]}));const byC=new Map((ed||[]).map(c=>[c.client_code,c.id]));const rows=clients.map(c=>{const cc=c.clientCode||"CL-"+String(c.id).padStart(4,"0");return{id:byC.get(cc)||c.id,client_code:cc,name:c.name,contact_person:c.contact||null,phone:c.phone||null,email:c.email||null,address:c.address||null,active:c.active!==false,notes:c.notes||null}});await upsertBatch("clients",rows);}
-async function lfSaveDepartments(){if(typeof departments=="undefined")return;const{data:ed}=await labourForceSupabase.from("departments").select("id,name").catch(()=>({data:[]}));const byN=new Map((ed||[]).map(d=>[String(d.name||"").toLowerCase(),d.id]));const rows=departments.map(d=>{const k=String(d.name||"").toLowerCase();return{id:byN.get(k)||rid("department",d.name),name:d.name,parent_id:d.parent?deptRemote(d.parent):null,default_daily_rate:Number(d.rate||0),default_overtime_rate:Number(d.otRate||0),active:d.active!==false}});await upsertBatch("departments",rows);}
-async function lfSaveRequests(){if(typeof labourRequests=="undefined")return;const{data:ed}=await labourForceSupabase.from("labour_requests").select("id,request_no").catch(()=>({data:[]}));const byN=new Map((ed||[]).map(r=>[String(r.request_no||"").toLowerCase(),r.id]));const sm={Pending:"pending",Approved:"approved",Allocated:"partially_fulfilled",Completed:"fulfilled",Cancelled:"cancelled",Rejected:"rejected"};for(const r of labourRequests){if(!clientRemote(r.clientId))continue;const rn=r.requestNo||"LR-"+String(r.id).padStart(4,"0");const ed=r.endDate||(r.startDate&&r.duration?new Date(new Date(r.startDate+"T00:00:00").getTime()+(Number(r.duration)-1)*86400000).toISOString().slice(0,10):null);const row={id:byN.get(rn.toLowerCase())||rid("request",r.id),request_no:rn,client_id:clientRemote(r.clientId),department_id:deptRemote(r.department),classification:r.classification||null,workers_required:Number(r.workersRequired||1),start_date:r.startDate,end_date:ed,shift:r.shift||null,location:r.location||null,reason:r.reason||null,notes:r.notes||null,status:sm[r.status]||"pending",requested_by:profileId()};await upsert("labour_requests",row).catch(e=>console.warn("[LF] lfSaveRequests:",e.message));const reqId=rid("request",r.id);for(const wid of(r.allocatedWorkerIds||[])){const wr=workerRemote(wid);if(!wr)continue;await upsert("labour_request_workers",{id:rid("request_worker",r.id+":"+wid),request_id:reqId,worker_id:wr,allocated_by:profileId(),status:"allocated"}).catch(()=>{});}}}
+async function lfSaveWorkers(){if(typeof workers=="undefined")return;const ed=await safeTableRows("workers","id,employee_no,id_number");const byIdentity=new Map();(ed||[]).forEach(w=>{if(w.employee_no)byIdentity.set('staff:'+String(w.employee_no).trim().toLowerCase(),w.id);if(w.id_number)byIdentity.set('id:'+String(w.id_number).trim().toLowerCase(),w.id);});const rows=workers.map(w=>{const remoteId=byIdentity.get('id:'+String(w.idNumber||w.nationalId||'').trim().toLowerCase())||byIdentity.get('staff:'+String(w.employeeNo||'').trim().toLowerCase())||workerRemote(w.id)||w.id;setRid('worker',w.id,remoteId);return{id:remoteId,employee_no:w.employeeNo,full_name:w.name,phone:w.phone||null,national_id:w.nationalId||w.idNumber||null,id_number:w.idNumber||w.nationalId||null,kra_pin:w.kraPin||null,nssf_number:w.nssfNumber||null,shif_number:w.shifNumber||null,account_number:w.accountNumber||null,department_id:deptRemote(w.department),classification:w.classification||"Unskilled",designation:w.designation||null,daily_rate:Number(w.rate||0),overtime_rate:Number(w.otRate||0),join_date:w.joinDate||null,source_sheet:w.workbookSource||null,active:w.active!==false,notes:w.notes||null};});for(let i=0;i<rows.length;i+=100)await upsertBatch("workers",rows.slice(i,i+100));}
+async function lfSaveClients(){if(typeof clients=="undefined")return;const ed=await safeTableRows("clients","id,client_code");const byC=new Map((ed||[]).map(c=>[c.client_code,c.id]));const rows=clients.map(c=>{const cc=c.clientCode||"CL-"+String(c.id).padStart(4,"0");return{id:byC.get(cc)||c.id,client_code:cc,name:c.name,contact_person:c.contact||null,phone:c.phone||null,email:c.email||null,address:c.address||null,active:c.active!==false,notes:c.notes||null}});await upsertBatch("clients",rows);}
+async function lfSaveDepartments(){if(typeof departments=="undefined")return;const ed=await safeTableRows("departments","id,name");const byN=new Map((ed||[]).map(d=>[String(d.name||"").toLowerCase(),d.id]));const rows=departments.map(d=>{const k=String(d.name||"").toLowerCase();return{id:byN.get(k)||rid("department",d.name),name:d.name,parent_id:d.parent?deptRemote(d.parent):null,default_daily_rate:Number(d.rate||0),default_overtime_rate:Number(d.otRate||0),active:d.active!==false}});await upsertBatch("departments",rows);}
+async function lfSaveRequests(){if(typeof labourRequests=="undefined")return;const ed=await safeTableRows("labour_requests","id,request_no");const byN=new Map((ed||[]).map(r=>[String(r.request_no||"").toLowerCase(),r.id]));const sm={Pending:"pending",Approved:"approved",Allocated:"partially_fulfilled",Completed:"fulfilled",Cancelled:"cancelled",Rejected:"rejected"};for(const r of labourRequests){if(!clientRemote(r.clientId))continue;const rn=r.requestNo||"LR-"+String(r.id).padStart(4,"0");const ed2=r.endDate||(r.startDate&&r.duration?new Date(new Date(r.startDate+"T00:00:00").getTime()+(Number(r.duration)-1)*86400000).toISOString().slice(0,10):null);const row={id:byN.get(rn.toLowerCase())||rid("request",r.id),request_no:rn,client_id:clientRemote(r.clientId),department_id:deptRemote(r.department),classification:r.classification||null,workers_required:Number(r.workersRequired||1),start_date:r.startDate,end_date:ed2,shift:r.shift||null,location:r.location||null,reason:r.reason||null,notes:r.notes||null,status:sm[r.status]||"pending",requested_by:profileId()};await upsert("labour_requests",row).catch(e=>console.warn("[LF] lfSaveRequests:",e.message));const reqId=rid("request",r.id);for(const wid of(r.allocatedWorkerIds||[])){const wr=workerRemote(wid);if(!wr)continue;await upsert("labour_request_workers",{id:rid("request_worker",r.id+":"+wid),request_id:reqId,worker_id:wr,allocated_by:profileId(),status:"allocated"}).catch(()=>{});}}}
 async function lfSaveDeployments(){if(typeof deployments=="undefined")return;for(const d of deployments){await upsert("deployments",{id:rid("deployment",d.id),worker_id:workerRemote(d.workerId),client_id:clientRemote(d.clientId),request_id:d.requestId?rid("request",d.requestId):null,department_id:deptRemote(d.department),position:d.assignment||null,location:d.location||null,start_date:d.startDate,end_date:d.endDate||null,shift:d.shift||null,status:d.status==="Active"?"active":d.status==="Ended"?"completed":String(d.status||"active").toLowerCase(),created_by:profileId()}).catch(e=>console.warn("[LF] lfSaveDeployments:",e.message));}}
 async function lfSaveAudit(){if(typeof auditLog=="undefined")return;const rec=auditLog.slice(0,100);for(const a of rec){const aid=rid("audit",a.id);await labourForceSupabase.from("audit_logs").insert({id:aid,user_id:profileId(),action:a.action||"change",table_name:a.tableName||"operations",record_id:String(a.reference||""),old_data:a.oldData||null,new_data:a.newData||null,metadata:{details:a.details||null,source:"labour-force-frontend"}}).then(({error})=>{if(error&&error.code!=="23505")console.warn("[LF] audit insert:",error.message);});}}
 async function lfSaveAttendanceDate(date){if(!date||!attendance[date])return;const day=attendance[date];if(!day||!day.records)return;for(const[localWorkerId,r]of Object.entries(day.records||{})){const w=workers.find(wk=>Number(wk.id)===Number(localWorkerId));if(!w)continue;const wRemote=workerRemote(localWorkerId);if(!wRemote)continue;const status=r.status==="present"||r.status==="worked"||r.status==="approved"?"present":r.status==="pending"?"pending":"absent";const dep=typeof deployments!=="undefined"?deployments.find(d=>Number(d.workerId)===Number(localWorkerId)&&d.status==="Active"):null;const row={attendance_date:date,worker_id:wRemote,deployment_id:dep?rid("deployment",dep.id):null,client_id:dep?clientRemote(dep.clientId):null,department_id:deptRemote(w.department),status,overtime_hours:Number(r.overtime||0),regular_hours:Number(r.hours||0),remarks:r.remarks||r.notes||null,verification_status:r.verification_status==="verified"?"verified":"unverified",verified_by:r.verified_by_id||null,verified_at:r.verified_at||null,created_by:profileId(),updated_by:profileId()};try{const res=await labourForceSupabase.from("attendance").upsert(row,{onConflict:"worker_id,attendance_date"}).select("id").single();if(res.data?.id){const map=lfMap();map.attendance=map.attendance||{};map.attendance[date+":"+localWorkerId]=res.data.id;saveLfMap(map);}}catch(e){if(e.code==="42703"){const leg={...row};delete leg.verification_status;delete leg.verified_by;delete leg.verified_at;delete leg.remarks;await labourForceSupabase.from("attendance").upsert(leg,{onConflict:"worker_id,attendance_date"}).catch(()=>{});}else{console.warn("[LF] lfSaveAttendanceDate:",e.message);}}}}
@@ -490,7 +490,8 @@ async function hydrateAttendanceFromBackend(){
     // query succeeds, or until we hit a non-schema error (offset past end, table
     // missing). Supabase client never throws; errors come back in result.error.
     const COL_SETS=[
-      'attendance_date,worker_id,status,overtime_hours,time_in,time_out,submitted_at,remarks,supervisor_id',
+      'attendance_date,worker_id,status,overtime_hours,time_in,time_out,submitted_at,remarks,supervisor_id,batch_name,submitted_by',
+      'attendance_date,worker_id,status,overtime_hours,submitted_at,batch_name,submitted_by,supervisor_id',
       'attendance_date,worker_id,status,overtime_hours',
       'id,worker_id,attendance_date,status'
     ];
@@ -538,6 +539,23 @@ async function hydrateAttendanceFromBackend(){
       break;
     }
 
+    const profileIds=[...new Set(remoteRows.flatMap(function(row){
+      const ids=[];
+      if(row.submitted_by) ids.push(String(row.submitted_by));
+      if(row.supervisor_id) ids.push(String(row.supervisor_id));
+      return ids;
+    }))];
+    const profileNameById=new Map();
+    if(profileIds.length && labourForceSupabase){
+      try{
+        const pr=await labourForceSupabase.from('profiles').select('id,full_name,email').in('id',profileIds);
+        if(pr && pr.data && !pr.error){
+          pr.data.forEach(function(p){
+            profileNameById.set(String(p.id), p.full_name || p.email || 'Supervisor');
+          });
+        }
+      }catch(_e){ }
+    }
     const map=lfMap();
     const remoteByLocalWorker=new Map();
     for(const w of (typeof workers!=='undefined'?workers:[])){
@@ -582,13 +600,18 @@ async function hydrateAttendanceFromBackend(){
       const localWorkerId=remoteByLocalWorker.get(String(row.worker_id));
       if(!localWorkerId) continue;
       if(!fresh[date]) fresh[date]={status:'draft',submitted:false,submittedAt:null,approved:false,approvedAt:null,records:{}};
+      const supervisorId=row.supervisor_id || row.submitted_by || null;
       fresh[date].records[localWorkerId]={
         status: mapRemoteStatus(row.status),
         hours: Number(row.regular_hours ?? row.hours_worked ?? row.hours ?? 0),
         overtime: Number(row.overtime_hours ?? row.overtime ?? 0),
         timeIn: row.time_in||null,
         timeOut: row.time_out||null,
+        batchName: row.batch_name || 'Default',
         submittedAt: row.submitted_at||null,
+        submittedById: row.submitted_by || null,
+        supervisorId: supervisorId,
+        submittedByName: profileNameById.get(String(supervisorId || '')) || null,
         notes: row.remarks||'',
         verification_status:'verified',
         verified_by_id: row.supervisor_id||null,
@@ -604,7 +627,7 @@ async function hydrateAttendanceFromBackend(){
       if(a.status==='approved'){ day.submitted=true; day.approved=true; day.approvedAt=a.approved_at||day.approvedAt; day.submittedAt=day.submittedAt||a.submitted_at; }
     }
 
-    attendance = Object.assign({}, fresh, attendance||{});
+    attendance = Object.assign({}, attendance||{}, fresh);
     localStorage.setItem('labourforce_attendance', JSON.stringify(attendance));
     if(typeof lfDataVersion==='number') lfDataVersion++;
     console.log('[Labour Force] attendance hydrated:', Object.keys(fresh).length, 'day(s),', Object.values(fresh).reduce((n,d)=>n+Object.keys(d.records||{}).length,0), 'record(s) from cloud');
@@ -695,6 +718,28 @@ async function hydrateFromBackend(){
         safeTableRows('departments','id,name,active'),
         safeTableRows('workers_public','id,staff_no,id_number,name,department,designation,active,created_at,updated_at'),
         safeTableRows('labour_requests','id,request_no,client_id,department_id,classification,workers_required,start_date,end_date,shift,notes,status')]);
+      const recycleItems = typeof getRecycleBin === 'function' ? getRecycleBin() : [];
+      const deletedDepartmentNames = new Set(recycleItems.filter(item=>item.type==='department').map(item=>String(item.record?.name||'').trim().toLowerCase()).filter(Boolean));
+      const deletedClientNames = new Set(recycleItems.filter(item=>item.type==='client').map(item=>String(item.record?.name||'').trim().toLowerCase()).filter(Boolean));
+      const deletedClientCodes = new Set(recycleItems.filter(item=>item.type==='client').map(item=>String(item.record?.clientCode||'').trim().toLowerCase()).filter(Boolean));
+      const deletedWorkerKeys = new Set(recycleItems.filter(item=>item.type==='worker').flatMap(item=>{
+        const record=item.record||{};
+        const keys=[];
+        if(record.employeeNo)keys.push(String(record.employeeNo).trim().toLowerCase());
+        if(record.idNumber)keys.push(String(record.idNumber).trim().toLowerCase());
+        if(record.nationalId)keys.push(String(record.nationalId).trim().toLowerCase());
+        if(record.name)keys.push(String(record.name).trim().toLowerCase());
+        return keys;
+      }).filter(Boolean));
+      const rcVisible = rc.filter(c => {
+        const name=(c.name||'').trim().toLowerCase();
+        const clientCode=(c.client_code||'').trim().toLowerCase();
+        return !deletedClientNames.has(name) && !deletedClientCodes.has(clientCode);
+      });
+      const rdVisible = rd.filter(d => {
+        const name=(d.name||'').trim().toLowerCase();
+        return !deletedDepartmentNames.has(name);
+      });
       /* Phase 2: only attempt the raw `workers` read (which exposes rate/classification
          and other admin-only fields) when the signed-in profile is permitted to see
          them. This second read is allowed to come back empty (RLS-filtered) without
@@ -736,6 +781,12 @@ async function hydrateFromBackend(){
           source_sheet:rate.source_sheet||null, active:pub.active, notes:rate.notes||null
         };
       }) : rwRates;
+      const rwVisible = rw.filter(w => {
+        const employee=(w.employee_no||w.staff_no||'').trim().toLowerCase();
+        const idNumber=(w.id_number||w.national_id||'').trim().toLowerCase();
+        const name=(w.full_name||w.name||'').trim().toLowerCase();
+        return !deletedWorkerKeys.has(employee) && !deletedWorkerKeys.has(idNumber) && !deletedWorkerKeys.has(name);
+      });
       /* Diagnostics: surface exactly what the cloud returned for each master
          table. This makes the difference visible between (a) an empty cloud,
          (b) reads silently blocked by RLS/grants (safeTableRows -> []), or
@@ -744,17 +795,17 @@ async function hydrateFromBackend(){
          reports whether the rate-enriched raw `workers` read was even
          attempted � useful future debugging to confirm a non-rate role
          was correctly excluded from the rate path. */
-      window.__lfCloudCounts={clients:rc.length,departments:rd.length,workers:rw.length,workersPublic:rwPublic.length,workersRatesLoaded:ratesLoaded,requests:rr.length};
+      window.__lfCloudCounts={clients:rcVisible.length,departments:rdVisible.length,workers:rwVisible.length,workersPublic:rwPublic.length,workersRatesLoaded:ratesLoaded,requests:rr.length};
       console.log('[Labour Force] cloud read counts (clients/departments/workers/workersPublic/workersRatesLoaded/requests):',
-        rc.length, rd.length, rw.length, rwPublic.length, ratesLoaded, rr.length);
+        rcVisible.length, rdVisible.length, rwVisible.length, rwPublic.length, ratesLoaded, rr.length);
       /* Defensive guards: supervisor.html only loads data needed for attendance
          (workers + attendance) � clients/departments/requests arrays are not
          defined there. Each block only runs if the corresponding global exists
          AND the local array exists, so a reference error never blocks hydration
          on the supervisor page. */
-      if(rc.length && typeof clients!=='undefined' && Array.isArray(clients)){ clients=rc.map(c=>{ let local=clients.find(x=>map.client?.[String(x.id)]===c.id); if(!local) local={id:Date.now()+Math.random()}; setRid('client',local.id,c.id); return {...local,name:c.name,contact:c.contact_person||'',phone:c.phone||'',active:c.active,clientCode:c.client_code}; }); }
-      if(rd.length && typeof departments!=='undefined' && Array.isArray(departments)){ departments=rd.map(d=>{ let local=departments.find(x=>map.department?.[String(x.name)]===d.id)||departments.find(x=>x.name===d.name)||{name:d.name}; setRid('department',local.name,d.id); return {...local,name:d.name,parent:rd.find(p=>p.id===d.parent_id)?.name||'',rate:Number(d.default_daily_rate||local.rate||0),otRate:Number(d.default_overtime_rate||local.otRate||0),active:d.active}; }); }
-      if(rw.length && typeof workers!=='undefined' && Array.isArray(workers)){ workers=rw.map(w=>{ let local=workers.find(x=>map.worker?.[String(x.id)]===w.id)||workers.find(x=>x.id===w.id)||workers.find(x=>x.employeeNo===w.employee_no)||{id:Date.now()+Math.random()}; setRid('worker',local.id,w.id); return {...local,employeeNo:w.employee_no||w.staff_no||local.employeeNo,name:w.full_name||w.name||local.name,phone:w.phone||local.phone||'',nationalId:w.national_id||w.id_number||'',idNumber:w.id_number||w.national_id||'',kraPin:w.kra_pin||'',nssfNumber:w.nssf_number||'',shifNumber:w.shif_number||'',accountNumber:w.account_number||'',department:w.department||rd.find(d=>d.id===w.department_id)?.name||local.department||'Operations',classification:w.classification||local.classification||'Unskilled',designation:w.designation||'',rate:Number(w.daily_rate||w.override_rate_day||local.rate||0),otRate:Number(w.overtime_rate||w.override_rate_hour||local.otRate||0),joinDate:w.join_date||local.joinDate||'',workbookSource:w.source_sheet||'',active:w.active!==false,notes:w.notes||local.notes||''}; }); }
+      if(rcVisible.length && typeof clients!=='undefined' && Array.isArray(clients)){ clients=rcVisible.map(c=>{ let local=clients.find(x=>map.client?.[String(x.id)]===c.id); if(!local) local={id:Date.now()+Math.random()}; setRid('client',local.id,c.id); return {...local,name:c.name,contact:c.contact_person||'',phone:c.phone||'',active:c.active,clientCode:c.client_code}; }); }
+      if(rdVisible.length && typeof departments!=='undefined' && Array.isArray(departments)){ departments=rdVisible.map(d=>{ let local=departments.find(x=>map.department?.[String(x.name)]===d.id)||departments.find(x=>x.name===d.name)||{name:d.name}; setRid('department',local.name,d.id); return {...local,name:d.name,parent:rdVisible.find(p=>p.id===d.parent_id)?.name||'',rate:Number(d.default_daily_rate||local.rate||0),otRate:Number(d.default_overtime_rate||local.otRate||0),active:d.active}; }); }
+      if(rwVisible.length && typeof workers!=='undefined' && Array.isArray(workers)){ workers=rwVisible.map(w=>{ let local=workers.find(x=>map.worker?.[String(x.id)]===w.id)||workers.find(x=>x.id===w.id)||workers.find(x=>x.employeeNo===w.employee_no)||{id:Date.now()+Math.random()}; setRid('worker',local.id,w.id); return {...local,employeeNo:w.employee_no||w.staff_no||local.employeeNo,name:w.full_name||w.name||local.name,phone:w.phone||local.phone||'',nationalId:w.national_id||w.id_number||'',idNumber:w.id_number||w.national_id||'',kraPin:w.kra_pin||'',nssfNumber:w.nssf_number||'',shifNumber:w.shif_number||'',accountNumber:w.account_number||'',department:w.department||rdVisible.find(d=>d.id===w.department_id)?.name||local.department||'Operations',classification:w.classification||local.classification||'Unskilled',designation:w.designation||'',rate:Number(w.daily_rate||w.override_rate_day||local.rate||0),otRate:Number(w.overtime_rate||w.override_rate_hour||local.otRate||0),joinDate:w.join_date||local.joinDate||'',workbookSource:w.source_sheet||'',active:w.active!==false,notes:w.notes||local.notes||''}; }); }
       if(rr.length && typeof labourRequests!=='undefined' && Array.isArray(labourRequests)){ const statusMap={pending:'Pending',approved:'Approved',rejected:'Rejected',partially_fulfilled:'Allocated',fulfilled:'Completed',cancelled:'Cancelled'}; labourRequests=rr.map(r=>{let local=labourRequests.find(x=>map.request?.[String(x.id)]===r.id)||labourRequests.find(x=>x.requestNo===r.request_no)||{id:Date.now()+Math.random(),allocatedWorkerIds:[]}; setRid('request',local.id,r.id); return {...local,requestNo:r.request_no,clientId:rc.find(c=>String(c.id)===String(r.client_id))?.id||local.clientId,department:rd.find(d=>d.id===r.department_id)?.name||local.department||'',classification:r.classification||'',workersRequired:r.workers_required,startDate:r.start_date,duration:r.end_date?Math.max(1,Math.round((new Date(r.end_date)-new Date(r.start_date))/86400000)+1):1,shift:r.shift||'Day',notes:r.notes||'',status:statusMap[r.status]||'Pending'}; }); }
       /* Only persist arrays that exist on this page (supervisor.html only
          has workers + attendance; the others aren't declared there). */

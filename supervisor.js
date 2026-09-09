@@ -94,10 +94,10 @@
     });
   }
 
-  // Recompute supBatches from the workers table: one batch per unique designation.
-  // Each worker is placed in their own designation's batch (mark is empty until
-  // the supervisor marks them). This is the source of truth for which batches
-  // exist — local-only custom batch names are dropped.
+  // Recompute supBatches from the workers table while preserving any custom
+  // designations previously added from the UI. Workers still belong to their
+  // own designation by default, but supervisors can pick any available batch
+  // from the dropdown for attendance marking.
   function supBuildBatchesFromDesignations() {
     supBuildWorkerMap();
     var seen = {};
@@ -105,15 +105,11 @@
       var d = w.designation || 'Undesignated';
       if (seen[d]) return;
       seen[d] = true;
-      // Preserve any existing marks (e.g. submitted today) for this batch
       var existing = supBatches[d];
       supBatches[d] = existing || { workers: {}, submittedAt: null, submitted: false };
     });
-    // Drop any batches whose designation no longer matches any worker
-    Object.keys(supBatches).forEach(function (name) {
-      if (!seen[name]) delete supBatches[name];
-    });
-    // Pick a sensible active batch
+    // Preserve existing custom batches so supervisors can keep using
+    // user-added designations after reloads or partial worker data sets.
     if (!activeBatch || !supBatches[activeBatch]) {
       var keys = Object.keys(supBatches);
       activeBatch = keys[0] || '';
@@ -296,20 +292,41 @@
 
     var searchInput = document.getElementById('supSearch');
     if (searchInput) {
-      // Trigger search on Enter (avoids hitting the DB on every keystroke)
-      searchInput.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { e.preventDefault(); supSearchWorkers(searchInput.value); }
-      });
-      // Also re-search after a short idle (debounce) so users get live results
       var debTimer = null;
       searchInput.addEventListener('input', function () {
         if (debTimer) clearTimeout(debTimer);
         var v = searchInput.value.trim();
         if (v.length < 2) {
-          supWorkers = []; supRenderTabs(); supRenderSearch();
+          supWorkers = [];
+          supRenderTabs();
+          supRenderSearch();
           return;
         }
-        debTimer = setTimeout(function () { supSearchWorkers(v); }, 350);
+        debTimer = setTimeout(function () { supSearchWorkers(v); }, 250);
+      });
+    }
+
+    var designationSelect = document.getElementById('supDesignationSelect');
+    if (designationSelect) {
+      designationSelect.addEventListener('change', function () {
+        activeBatch = this.value || '';
+        supRenderTabs();
+        supRenderSearch();
+        supRenderTable();
+        supUpdateMetrics();
+        supSaveLocalDraft();
+        if (searchInput && searchInput.value.trim().length >= 2) {
+          supSearchWorkers(searchInput.value.trim());
+        }
+      });
+    }
+
+    var addDesignationBtn = document.getElementById('supAddDesignationBtn');
+    if (addDesignationBtn) {
+      addDesignationBtn.addEventListener('click', function () {
+        var name = prompt('Enter a new designation name:', '');
+        if (name === null) return;
+        supAddDesignation(name);
       });
     }
 
@@ -373,12 +390,20 @@
   function supLoadAssignedCount() {
     var client = supInitClient();
     if (!client) { supAssignedCount = 0; supUpdateMetrics(); return; }
-    client.from('workers').select('id', { count: 'exact', head: true }).limit(1)
+    client.from('workers_public').select('id', { count: 'exact', head: true }).limit(1)
       .then(function (result) {
-        if (result.error) { console.warn('[Supervisor] workers count failed:', result.error.message); supAssignedCount = 0; }
-        else supAssignedCount = result.count || 0;
+        if (result.error) {
+          console.warn('[Supervisor] workers_public count failed:', result.error.message);
+          return client.from('workers').select('id', { count: 'exact', head: true }).limit(1)
+            .then(function (fallback) {
+              if (fallback.error) { console.warn('[Supervisor] workers count failed:', fallback.error.message); supAssignedCount = 0; }
+              else supAssignedCount = fallback.count || 0;
+              supUpdateMetrics();
+            })['catch'](function (e) { console.warn('[Supervisor] workers count error:', e); supAssignedCount = 0; supUpdateMetrics(); });
+        }
+        supAssignedCount = result.count || 0;
         supUpdateMetrics();
-      })['catch'](function (e) { console.warn('[Supervisor] workers count error:', e); supAssignedCount = 0; supUpdateMetrics(); });
+      })['catch'](function (e) { console.warn('[Supervisor] workers_public count error:', e); supAssignedCount = 0; supUpdateMetrics(); });
   }
 
   // Load ALL active workers' id+designation so we can build the batch list.
@@ -387,33 +412,84 @@
   function supLoadDesignations() {
     var client = supInitClient();
     if (!client) return;
-    client.from('workers').select('id,designation')
-      .then(function (result) {
-        if (result.error) { console.warn('[Supervisor] designations read failed:', result.error.message); return; }
-        var rows = (result.data || []).map(function (r) {
-          return { id: r.id, designation: (r.designation && String(r.designation).trim()) || 'Undesignated' };
-        });
-        // Build the batch list from these lightweight rows
-        var seen = {};
-        rows.forEach(function (r) {
-          if (seen[r.designation]) return;
-          seen[r.designation] = true;
-          var existing = supBatches[r.designation];
-          supBatches[r.designation] = existing || { workers: {}, submittedAt: null, submitted: false };
-        });
-        // Add to the worker map (with just id+designation; full worker data
-        // is added when the supervisor searches)
-        rows.forEach(function (r) { supWorkerMap[String(r.id)] = supWorkerMap[String(r.id)] || { id: r.id, designation: r.designation }; });
-        // Drop any batch whose designation is no longer present
-        Object.keys(supBatches).forEach(function (name) {
-          if (!seen[name] && name !== 'Undesignated') delete supBatches[name];
-        });
-        if (!activeBatch || !supBatches[activeBatch]) {
-          var keys = Object.keys(supBatches);
-          activeBatch = keys[0] || '';
+
+    function finish(rows, designationRows) {
+      var seen = {};
+
+      (designationRows || []).forEach(function (r) {
+        var designation = (r.name && String(r.name).trim()) || '';
+        if (!designation || seen[designation]) return;
+        seen[designation] = true;
+        var existing = supBatches[designation];
+        supBatches[designation] = existing || { workers: {}, submittedAt: null, submitted: false };
+      });
+
+      (rows || []).forEach(function (r) {
+        var designation = (r.designation && String(r.designation).trim()) || 'Undesignated';
+        if (seen[designation]) {
+          supWorkerMap[String(r.id)] = supWorkerMap[String(r.id)] || { id: r.id, designation: designation };
+          return;
         }
-        supRenderTabs(); supUpdateMetrics();
-      })['catch'](function (e) { console.warn('[Supervisor] designations error:', e); });
+        seen[designation] = true;
+        var existing = supBatches[designation];
+        supBatches[designation] = existing || { workers: {}, submittedAt: null, submitted: false };
+        supWorkerMap[String(r.id)] = supWorkerMap[String(r.id)] || { id: r.id, designation: designation };
+      });
+
+      if (!activeBatch || !supBatches[activeBatch]) {
+        var keys = Object.keys(supBatches);
+        activeBatch = keys[0] || '';
+      }
+      supPopulateDesignationSelect();
+      supRenderTabs();
+      supUpdateMetrics();
+    }
+
+    function loadDesignationRows() {
+      return client.from('designations').select('id,name,department_id')
+        .then(function (result) {
+          if (result && result.error) {
+            console.warn('[Supervisor] designations table read failed:', result.error.message);
+            return [];
+          }
+          return (result.data || []).map(function (row) {
+            return { name: row.name, department_id: row.department_id };
+          });
+        })['catch'](function (e) {
+          console.warn('[Supervisor] designations table read error:', e && e.message || e);
+          return [];
+        });
+    }
+
+    loadDesignationRows().then(function (designationRows) {
+      client.from('workers_public').select('id,designation,active')
+        .then(function (result) {
+          if (result && result.error) {
+            console.warn('[Supervisor] workers_public designations read failed:', result.error.message);
+            return client.from('workers').select('id,designation')
+              .then(function (fallback) {
+                if (fallback.error) { console.warn('[Supervisor] workers designations read failed:', fallback.error.message); return; }
+                finish((fallback.data || []).map(function (r) {
+                  return { id: r.id, designation: (r.designation && String(r.designation).trim()) || 'Undesignated' };
+                }), designationRows);
+              });
+          }
+          var rows = (result.data || []).map(function (r) {
+            return { id: r.id, designation: (r.designation && String(r.designation).trim()) || 'Undesignated' };
+          });
+          if (rows.length) {
+            finish(rows, designationRows);
+            return;
+          }
+          return client.from('workers').select('id,designation')
+            .then(function (fallback) {
+              if (fallback.error) { console.warn('[Supervisor] workers designations read failed:', fallback.error.message); return; }
+              finish((fallback.data || []).map(function (r) {
+                return { id: r.id, designation: (r.designation && String(r.designation).trim()) || 'Undesignated' };
+              }), designationRows);
+            });
+        })['catch'](function (e) { console.warn('[Supervisor] designations error:', e); });
+    });
   }
 
   // ---- Lazy worker search (server-side filtered) ----
@@ -426,41 +502,60 @@
     if (!container) return;
     var q = (query || '').trim();
     if (q.length < 2) {
-      container.innerHTML = '<div class="sup-hint">Type at least 2 characters and press Enter to search for a worker.</div>';
+      container.innerHTML = '<div class="sup-hint">Select a designation, then type at least 2 characters to search for a worker.</div>';
       return;
     }
     var client = supInitClient();
     if (!client) { container.innerHTML = '<div class="sup-empty">Supabase not available</div>'; return; }
     var myToken = ++supSearchToken;
-    // Cache: repeat same query (ignoring case) within 60 s hits local memory.
     var cacheKey = q.toLowerCase();
     var cached = supSearchCache[cacheKey];
     if (cached && (Date.now() - cached.ts) < supSearchCacheMs) {
       if (myToken !== supSearchToken) return;
       supWorkers = cached.rows;
-      // Re-merge designation info from cache into worker map
       supWorkers.forEach(function (w) { supWorkerMap[String(w.id)] = w; });
       supRenderSearch();
       return;
     }
     container.innerHTML = '<div class="sup-hint"><span class="sup-spinner"></span> Searching...</div>';
     var ilike = '%' + q + '%';
-    // RLS on the `workers` table returns only rows the current profile may see.
-    // Only request the columns we actually use to minimise payload.
-    client.from('workers')
-      .select('id,employee_no,id_number,full_name,department_id,designation,active')
-      .or('full_name.ilike.' + ilike + ',employee_no.ilike.' + ilike + ',id_number.ilike.' + ilike)
-      .limit(20)
+
+    function applySearchRows(result, sourceName) {
+      if (myToken !== supSearchToken) return;
+      if (result.error) {
+        console.warn('[Supervisor] ' + sourceName + ' search failed:', result.error.message);
+        container.innerHTML = '<div class="sup-empty">Search failed: ' + supEscape(result.error.message) + '</div>';
+        return;
+      }
+      var rows = (result.data || []).map(mapWorkerRow);
+      supSearchCache[cacheKey] = { rows: rows, ts: Date.now() };
+      supWorkers = rows;
+      rows.forEach(function (w) { supWorkerMap[String(w.id)] = w; });
+      supRenderSearch();
+    }
+
+    client.from('workers_public')
+      .select('id,staff_no,id_number,name,department,designation,active')
+      .or('name.ilike.' + ilike + ',staff_no.ilike.' + ilike + ',id_number.ilike.' + ilike)
+      .limit(12)
       .then(function (result) {
-        if (myToken !== supSearchToken) return; // stale
-        if (result.error) { console.warn('[Supervisor] workers search failed:', result.error.message); container.innerHTML = '<div class="sup-empty">Search failed: ' + supEscape(result.error.message) + '</div>'; return; }
-        var rows = (result.data || []).map(mapWorkerRow);
-        supSearchCache[cacheKey] = { rows: rows, ts: Date.now() };
-        supWorkers = rows;
-        // Merge search results into the worker map so we know each worker's
-        // designation for batch routing.
-        rows.forEach(function (w) { supWorkerMap[String(w.id)] = w; });
-        supRenderSearch();
+        if (result && result.error) {
+          console.warn('[Supervisor] workers_public search failed:', result.error.message);
+          return client.from('workers')
+            .select('id,employee_no,id_number,full_name,department_id,designation,active')
+            .or('full_name.ilike.' + ilike + ',employee_no.ilike.' + ilike + ',id_number.ilike.' + ilike)
+            .limit(12)
+            .then(function (fallback) { return applySearchRows(fallback, 'workers'); });
+        }
+        if ((result.data || []).length) {
+          applySearchRows(result, 'workers_public');
+          return;
+        }
+        return client.from('workers')
+          .select('id,employee_no,id_number,full_name,department_id,designation,active')
+          .or('full_name.ilike.' + ilike + ',employee_no.ilike.' + ilike + ',id_number.ilike.' + ilike)
+          .limit(12)
+          .then(function (fallback) { return applySearchRows(fallback, 'workers'); });
       })['catch'](function (e) {
         if (myToken !== supSearchToken) return;
         console.error('[Supervisor] search error:', e);
@@ -603,17 +698,12 @@
 
   function supMarkPresent(workerId) {
     var wid = String(workerId);
-    var w = supWorkerMap[wid];
-    var targetBatch = batchForWorker(wid);
-    if (!targetBatch) { supToast('Worker has no designation — cannot assign to a batch.', 'error'); return; }
-    var targetName = (w && w.designation) ? w.designation : 'Undesignated';
+    var w = supWorkerMap[wid] || { id: wid, name: '(unknown worker)', designation: 'Undesignated' };
+    var targetName = activeBatch || (w && w.designation) || 'Undesignated';
+    var targetBatch = ensureBatch(targetName);
     var existingBatch = batchNameForWorker(wid);
-    if (existingBatch && existingBatch !== targetName) {
-      var existing = supBatches[existingBatch] && supBatches[existingBatch].workers[wid];
-      if (existing && existing.status !== 'pending') {
-        supToast(w.name + ' is already marked as ' + existing.status + ' in "' + existingBatch + '". Remove that first.', 'error');
-        return;
-      }
+    if (existingBatch && existingBatch !== targetName && supBatches[existingBatch]) {
+      delete supBatches[existingBatch].workers[wid];
     }
     targetBatch.workers[wid] = { status: 'present', hoursWorked: 9, overtimeHours: 0, remarks: '' };
     supDirty = true; supSaveLocalDraft();
@@ -622,17 +712,12 @@
 
   function supMarkAbsent(workerId) {
     var wid = String(workerId);
-    var w = supWorkerMap[wid];
-    var targetBatch = batchForWorker(wid);
-    if (!targetBatch) { supToast('Worker has no designation — cannot assign to a batch.', 'error'); return; }
-    var targetName = (w && w.designation) ? w.designation : 'Undesignated';
+    var w = supWorkerMap[wid] || { id: wid, name: '(unknown worker)', designation: 'Undesignated' };
+    var targetName = activeBatch || (w && w.designation) || 'Undesignated';
+    var targetBatch = ensureBatch(targetName);
     var existingBatch = batchNameForWorker(wid);
-    if (existingBatch && existingBatch !== targetName) {
-      var existing = supBatches[existingBatch] && supBatches[existingBatch].workers[wid];
-      if (existing && existing.status !== 'pending') {
-        supToast(w.name + ' is already marked in "' + existingBatch + '". Remove that first.', 'error');
-        return;
-      }
+    if (existingBatch && existingBatch !== targetName && supBatches[existingBatch]) {
+      delete supBatches[existingBatch].workers[wid];
     }
     targetBatch.workers[wid] = { status: 'absent', hoursWorked: 0, overtimeHours: 0, remarks: '' };
     supDirty = true; supSaveLocalDraft();
@@ -730,9 +815,14 @@
       var q = client.from('attendance').upsert(payload, { onConflict: conflict }).select('id,worker_id');
       return q.then(function (res) {
         if (res && res.error) {
-          // If batch_name is the problem (42703 undefined_column), fall through
-          // to the next col-set which omits it.
-          if (res.error.code === '42703') {
+          var code = String(res.error.code || '');
+          var msg = String(res.error.message || '');
+          // Some legacy/live schemas throw either 42703 (missing column) or
+          // 42P10 / ON CONFLICT specification when batch_name exists but the
+          // unique/conflict target is not aligned yet. In both cases, fall
+          // back to the next, less-specific column set.
+          var shouldFallback = code === '42703' || code === '42P10' || /ON CONFLICT specification|unique or exclusion constraint/i.test(msg);
+          if (shouldFallback) {
             lastErr = res.error;
             return next();
           }
@@ -770,10 +860,12 @@
     wrap.querySelectorAll('.batch-tab').forEach(function (t) {
       t.addEventListener('click', function () {
         activeBatch = t.dataset.batch;
+        supPopulateDesignationSelect();
         supRenderTabs(); supRenderSearch(); supRenderTable(); supUpdateMetrics();
         supSaveLocalDraft();
       });
     });
+    supPopulateDesignationSelect();
   }
 
   // ---- Cloud submit per batch ----
@@ -831,7 +923,7 @@
       supToast('Submitted ' + records.length + ' record(s) in "' + batchName + '" → awaiting approval', "success");
       supRenderTabs();
     } catch (e) {
-      var msg = e && (e.message || (e.error && e.error.message)) || (typeof e === "string" ? e : "unknown");
+      var msg = e && (e.message || (e.error && e.error.message)) || (typeof e === "string" ? e : JSON.stringify(e || {}));
       supToast("Submit failed: " + msg, "error");
       console.error("[Supervisor] submit attendance error:", e);
     }
@@ -844,23 +936,31 @@
   function supRenderSearch() {
     var container = document.getElementById('supSearchResults');
     if (!container) return;
+    var activeTitle = document.getElementById('supActiveBatchTitle');
+    var activeMeta = document.getElementById('supActiveBatchMeta');
+    if (activeTitle) {
+      activeTitle.textContent = activeBatch ? ('Designation: ' + activeBatch) : 'Designation overview';
+    }
+    if (activeMeta) {
+      activeMeta.textContent = activeBatch
+        ? ('Search and mark workers in ' + activeBatch + '. Select a worker to add them to the attendance sheet.')
+        : 'Select a designation to start marking attendance.';
+    }
     if (!supWorkers.length) {
-      container.innerHTML = '<div class="sup-hint">Type at least 2 characters and press Enter to search for a worker.</div>';
+      container.innerHTML = '<div class="sup-hint">Select a designation, then type at least 2 characters to search for a worker.</div>';
       return;
     }
     container.innerHTML = '';
-    supWorkers.forEach(function (w) {
+    var visibleWorkers = supWorkers.slice(0, 8);
+    visibleWorkers.forEach(function (w) {
       var r = supRecord(w.id);
       var already = r.status !== 'pending';
       var statusClass = r.status === 'present' ? 'present' : (r.status === 'absent' ? 'absent' : 'pending');
-      var design = w.designation || 'Undesignated';
       var card = document.createElement('div');
-      card.className = 'sup-worker-card';
+      card.className = 'sup-search-result-card';
       card.innerHTML =
         '<div class="sup-worker-info">' +
-          '<div class="sup-worker-name">' + supEscape(w.name) +
-            ' <span class="sup-pill pending" title="Designation / batch">' + supEscape(design) + '</span>' +
-          '</div>' +
+          '<div class="sup-worker-name">' + supEscape(w.name) + '</div>' +
           '<div class="sup-worker-meta">' +
             '<span>' + supEscape(w.employeeNo || '-') + '</span>' +
             '<span>' + supEscape(w.department || '-') + '</span>' +
@@ -933,11 +1033,10 @@
       else if (r.status === 'absent') absent++;
       if (r.overtimeHours) otTotal += Number(r.overtimeHours) || 0;
     });
-    // Update the batch label chips
-    var batchLabel = document.getElementById('supBatchLabel');
-    var batchLabel2 = document.getElementById('supBatchLabel2');
-    if (batchLabel) batchLabel.textContent = activeBatch || '—';
-    if (batchLabel2) batchLabel2.textContent = activeBatch || '—';
+    var searchInput = document.getElementById('supSearch');
+    if (searchInput) {
+      searchInput.placeholder = activeBatch ? 'Search ' + activeBatch + ' workers' : 'Search by name, ID, or staff no.';
+    }
     // Update stat tiles
     var exp = document.getElementById('supExpected');
     var pr = document.getElementById('supPresent');
@@ -973,6 +1072,86 @@
     };
     supDirty = true; supSaveLocalDraft();
     supUpdateMetrics(); supRenderTabs(); supRenderSearch(); supRenderTable();
+  }
+
+  function supPopulateDesignationSelect() {
+    var select = document.getElementById('supDesignationSelect');
+    if (!select) return;
+    var names = Object.keys(supBatches).sort();
+    if (!names.length) {
+      select.innerHTML = '<option value="">No designations found</option>';
+      select.value = '';
+      return;
+    }
+    var current = activeBatch && supBatches[activeBatch] ? activeBatch : names[0];
+    if (activeBatch && !supBatches[activeBatch]) activeBatch = current;
+    select.innerHTML = names.map(function (name) {
+      return '<option value="' + supEscape(name) + '"' + (name === current ? ' selected' : '') + '>' + supEscape(name) + '</option>';
+    }).join('');
+    select.value = current;
+  }
+
+  function supAddDesignation(name) {
+    var normalized = String(name || '').trim();
+    if (!normalized) {
+      supToast('Enter a designation name first.', 'error');
+      return;
+    }
+
+    if (supBatches[normalized]) {
+      activeBatch = normalized;
+      supPopulateDesignationSelect();
+      supRenderTabs();
+      supRenderSearch();
+      supRenderTable();
+      supUpdateMetrics();
+      supSaveLocalDraft();
+      supToast('Designation already exists: ' + normalized, 'info');
+      return;
+    }
+
+    supBatches[normalized] = { workers: {}, submittedAt: null, submitted: false };
+    activeBatch = normalized;
+    supPopulateDesignationSelect();
+    supRenderTabs();
+    supRenderSearch();
+    supRenderTable();
+    supUpdateMetrics();
+    supSaveLocalDraft();
+
+    var client = supInitClient();
+    if (!client) {
+      supToast('Designation added locally, but Supabase is unavailable.', 'error');
+      return;
+    }
+
+    var chosenDepartmentId = null;
+    if (supDepartments && Object.keys(supDepartments).length) {
+      chosenDepartmentId = Number(Object.keys(supDepartments)[0]);
+    }
+
+    if (!chosenDepartmentId) {
+      supToast('Designation added locally, but no department is available to sync it to the system.', 'error');
+      return;
+    }
+
+    client.from('designations').insert([{
+      name: normalized,
+      department_id: chosenDepartmentId,
+      rate_day: 0,
+      rate_hour: 0
+    }]).select('id,name')
+      .then(function (result) {
+        if (result && result.error) {
+          console.warn('[Supervisor] create designation failed:', result.error.message);
+          supToast('Designation added locally, but syncing it to the system failed: ' + result.error.message, 'error');
+          return;
+        }
+        supToast('Designation added: ' + normalized, 'success');
+      })['catch'](function (e) {
+        console.warn('[Supervisor] create designation error:', e && e.message || e);
+        supToast('Designation added locally, but syncing it to the system failed: ' + (e && e.message || String(e)), 'error');
+      });
   }
 
   function supEscape(s) { if (s == null) return ''; return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }

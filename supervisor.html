@@ -62,12 +62,33 @@ button:focus-visible,input:focus-visible{outline:2px solid rgba(94,234,212,.6);o
 .sup-section-body{padding:14px 18px}
 
 /* Search */
-.sup-search-wrap{position:relative}
+.sup-search-wrap{position:relative;width:100%}
 .sup-search-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none;font-size:13px}
-#supSearch{width:100%;max-width:340px;padding:9px 12px 9px 34px;border:1px solid var(--border);border-radius:10px;background:rgba(15,23,42,.72);color:var(--text);font-size:13px;outline:none;transition:border-color .15s ease, box-shadow .15s ease, transform .15s ease}
+#supSearch{width:100%;max-width:100%;padding:9px 12px 9px 34px;border:1px solid var(--border);border-radius:10px;background:rgba(15,23,42,.72);color:var(--text);font-size:13px;outline:none;transition:border-color .15s ease, box-shadow .15s ease, transform .15s ease}
 #supSearch:focus{border-color:rgba(94,234,212,.8);box-shadow:0 0 0 3px rgba(94,234,212,.12)}
 #supSearch::placeholder{color:var(--muted)}
 .sup-date-picker{padding:7px 11px;border:1px solid var(--border);border-radius:10px;background:rgba(15,23,42,.72);color:var(--text);font-size:12px;outline:none}
+.sup-toolbar{display:grid;grid-template-columns:minmax(180px,240px) minmax(0,1fr);gap:12px;align-items:end}
+.sup-toolbar-field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.sup-toolbar-field label{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.6px;text-transform:uppercase}
+.sup-select{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:10px;background:rgba(15,23,42,.72);color:var(--text);font-size:13px;outline:none}
+.sup-select:focus{border-color:rgba(94,234,212,.8);box-shadow:0 0 0 3px rgba(94,234,212,.12)}
+.sup-search-results{display:grid;gap:8px;min-height:68px;padding-top:6px}
+.sup-search-result-card{display:flex;justify-content:space-between;align-items:center;padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:rgba(15,23,42,.56);gap:12px;transition:border-color .15s ease, transform .15s ease, box-shadow .15s ease}
+.sup-search-result-card:hover{border-color:rgba(94,234,212,.45);transform:translateY(-1px);box-shadow:0 8px 18px rgba(15,23,42,.16)}
+.sup-search-result-card .sup-worker-info{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}
+.sup-search-result-card .sup-worker-name{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sup-search-result-card .sup-worker-meta{font-size:11px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap}
+.sup-search-result-card .sup-worker-actions{display:flex;gap:6px;flex-shrink:0;align-items:center;flex-wrap:wrap}
+.sup-search-result-card .sup-worker-actions button{padding:7px 10px;font-size:11px}
+.sup-compact-summary{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:rgba(94,234,212,.04);margin-bottom:10px}
+.sup-compact-summary strong{font-size:13px;color:var(--text)}
+.sup-compact-summary small{color:var(--muted);font-size:11px}
+@media (max-width: 640px){
+  .sup-toolbar{grid-template-columns:1fr}
+  .sup-search-result-card{align-items:flex-start;flex-direction:column}
+  .sup-search-result-card .sup-worker-actions{width:100%;justify-content:flex-end}
+}
 
 /* Search results */
 #supSearchResults{min-height:40px}
@@ -210,25 +231,35 @@ input[type="checkbox"]{width:15px;height:15px;cursor:pointer;accent-color:var(--
     <div class="sup-stat"><div class="sup-stat-label">Pending</div><div class="sup-stat-value pending" id="supPending">0</div><div class="sup-stat-sub">unmarked</div></div>
   </div>
 
-  <!-- Batch tabs: one per worker designation, click to switch active batch -->
-  <div class="batch-bar" id="supBatchTabs">
-    <!-- rendered by supRenderTabs() -->
-  </div>
-
   <!-- Search -->
   <section class="sup-section">
     <div class="sup-section-head">
-      <span>Add attendance <span id="supBatchLabel" class="batch-label-chip">Wagon</span></span>
-      <div class="right">
-        <div class="sup-search-wrap">
-          <span class="sup-search-icon">&#x1F50D;</span>
-          <input id="supSearch" type="search" placeholder="Search by name, ID, or staff no. then press Enter...">
-        </div>
-      </div>
+      <span>Mark attendance</span>
     </div>
     <div class="sup-section-body">
-      <div id="supSearchResults">
-        <div class="sup-hint">Type at least 2 characters and press Enter to search for a worker.</div>
+      <div class="sup-toolbar">
+        <div class="sup-toolbar-field">
+          <label for="supDesignationSelect">Designation</label>
+          <select id="supDesignationSelect" class="sup-select" aria-label="Choose designation"></select>
+        </div>
+        <div class="sup-toolbar-field">
+          <label for="supSearch">Search worker</label>
+          <div class="sup-search-wrap">
+            <span class="sup-search-icon">&#x1F50D;</span>
+            <input id="supSearch" type="search" placeholder="Search by name, ID, or staff no.">
+          </div>
+        </div>
+        <div class="sup-toolbar-field">
+          <label>Manage</label>
+          <button class="btn btn-secondary" id="supAddDesignationBtn" type="button">+ Add designation</button>
+        </div>
+      </div>
+      <div class="sup-compact-summary">
+        <strong id="supActiveBatchTitle">Designation overview</strong>
+        <small id="supActiveBatchMeta">Select a designation to start marking attendance.</small>
+      </div>
+      <div id="supSearchResults" class="sup-search-results">
+        <div class="sup-hint">Select a designation, then search for a worker to add attendance.</div>
       </div>
     </div>
   </section>
@@ -236,7 +267,7 @@ input[type="checkbox"]{width:15px;height:15px;cursor:pointer;accent-color:var(--
   <!-- Table -->
   <section class="sup-section">
     <div class="sup-section-head">
-      <span>Attendance <span id="supBatchLabel2" class="batch-label-chip">Wagon</span></span>
+      <span>Attendance</span>
       <div class="right">
         <button class="btn btn-secondary" id="supEditSelected">Edit selected</button>
         <button class="btn btn-danger" id="supMarkAbsentSelected">Mark absent</button>

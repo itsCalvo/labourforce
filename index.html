@@ -195,7 +195,12 @@
 <section id="departments" class="page">
 <div class="section">
     <div class="section-header"><h2>Departments</h2><button class="primary" onclick="openDepartmentModal()">+ Add Department</button></div>
-    <div class="table-container"><table><thead><tr><th>Department</th><th>Parent</th><th>Workers</th><th>Daily wage</th><th>OT wage</th><th>Actions</th></tr></thead><tbody id="departmentsTable"></tbody></table></div>
+    <div class="controls" style="margin: 12px 0;"><label><input type="checkbox" id="selectAllDepartments" onchange="toggleAllDepartments(this.checked)"> Select all visible</label><select id="departmentBulkAction"><option value="">Choose bulk action</option><option value="rates">Set selected department rates</option><option value="parent">Set selected parent department</option><option value="move-workers">Move workers from selected departments</option><option value="delete">Delete selected departments</option></select><button class="secondary" onclick="applyDepartmentBulkAction()">Apply to selected</button><button class="secondary" onclick="openWorkerModalForSelectedDepartment()">+ Add Worker to selected department</button><span id="departmentSelectionCount" class="muted">0 selected</span></div>
+    <div class="table-container"><table><thead><tr><th>Select</th><th>Department</th><th>Parent</th><th>Workers</th><th>Daily wage</th><th>OT wage</th><th>Actions</th></tr></thead><tbody id="departmentsTable"></tbody></table></div>
+</div>
+<div class="section" id="departmentRecycleBinSection" style="display:none; margin-top:22px;">
+    <div class="section-header"><h2>Recycle Bin</h2><small class="muted">Super admin only · deleted departments can be restored here</small></div>
+    <div class="table-container"><table><thead><tr><th>Department</th><th>Parent</th><th>Daily wage</th><th>OT wage</th><th>Deleted</th><th>Action</th></tr></thead><tbody id="departmentRecycleBinTable"></tbody></table></div>
 </div>
 </section>
 
@@ -263,7 +268,11 @@
 </section>
 
 <section id="reports" class="page">
-<div class="section"><div class="section-header"><h2>Reports</h2><button class="primary" onclick="exportAttendance()">Export Attendance CSV</button></div><div class="inner-padding"><div class="cards"><div class="card"><div class="card-label">Active Workers</div><div class="card-value" id="reportWorkers">0</div></div><div class="card"><div class="card-label">Clients</div><div class="card-value" id="reportClients">0</div></div><div class="card"><div class="card-label">Departments</div><div class="card-value" id="reportDepartments">0</div></div><div class="card"><div class="card-label">Today's Attendance</div><div class="card-value" id="reportAttendance">Pending</div></div></div></div></div>
+<div class="section"><div class="section-header"><h2>Reports</h2><button class="primary" onclick="exportAttendance()">Export Approved Attendance CSV</button></div><div class="inner-padding"><div class="cards"><div class="card"><div class="card-label">Active Workers</div><div class="card-value" id="reportWorkers">0</div></div><div class="card"><div class="card-label">Clients</div><div class="card-value" id="reportClients">0</div></div><div class="card"><div class="card-label">Departments</div><div class="card-value" id="reportDepartments">0</div></div><div class="card"><div class="card-label">Today's Attendance</div><div class="card-value" id="reportAttendance">Pending</div></div></div></div></div>
+<div class="section">
+  <div class="section-header"><h2>Approved Attendance History</h2></div>
+  <div class="table-container"><table><thead><tr><th>Date</th><th>Batches</th><th>Workers Attended</th><th>Total Rows</th><th>OT Hours</th><th>Approved By</th><th>Export</th></tr></thead><tbody id="approvedHistoryTable"></tbody></table></div>
+</div>
 </section>
 
 
