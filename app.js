@@ -733,6 +733,41 @@ function renderPayroll(){
 }
 function calculatePayroll(){renderPayroll();payroll.lastCalculated=new Date().toISOString();saveData();showToast("Payroll calculated from approved attendance.")}
 
+/* ---------- enhanced reports (date range, department breakdown, worker summary) ---------- */
+function getReportDateRange(){
+  const rangeEl=document.getElementById("reportDateRange");if(!rangeEl)return{start:null,end:null};
+  const range=rangeEl.value;const today=new Date().toISOString().split("T")[0];
+  if(range==="custom"){const s=document.getElementById("reportStartDate")?.value;const e=document.getElementById("reportEndDate")?.value;return{start:s||null,end:e||today};}
+  const days=parseInt(range)||14;const startDate=new Date();startDate.setDate(startDate.getDate()-days);
+  return{start:startDate.toISOString().split("T")[0],end:today};
+}
+function renderReports(){
+  const rw=document.getElementById("reportWorkers");if(rw)rw.textContent=workers.filter(w=>w.active).length;
+  const rc=document.getElementById("reportClients");if(rc)rc.textContent=clients.filter(c=>c.active).length;
+  const rd=document.getElementById("reportDepartments");if(rd)rd.textContent=departments.length;
+  const d=attendance[today()];const ra=document.getElementById("reportAttendance");if(ra)ra.textContent=d?.approved?"Approved":d?.submitted?"Submitted":"Pending";
+  const range=getReportDateRange();const start=range.start||"0000-01-01";const end=range.end||"9999-12-31";
+  const relevantDates=Object.keys(attendance).filter(date=>date>=start&&date<=end&&attendance[date]?.approved).sort();
+  let totalPresent=0,totalAbsent=0,totalRows=0,totalOT=0,totalPending=0;
+  const deptStats=new Map();const workerStats=new Map();
+  relevantDates.forEach(date=>{const day=attendance[date];if(!day||!day.records)return;workers.filter(w=>w.active).forEach(w=>{const r=day.records[w.id];if(!r)return;totalRows++;const status=r.status||"pending";if(status==="worked"||status==="present")totalPresent++;if(!deptStats.has(w.department))deptStats.set(w.department,{workers:0,present:0,absent:0,ot:0});const ds=deptStats.get(w.department);if(status==="worked"||status==="present"){ds.present++;ds.ot+=Number(r.overtime||0);}else if(status==="absent"){ds.absent++;}else{totalPending++;}const ws=workerStats.get(w.id)||{name:w.name,department:w.department,present:0,absent:0,pending:0,ot:0};if(status==="worked"||status==="present")ws.present++;else if(status==="absent")ws.absent++;else ws.pending++;ws.ot+=Number(r.overtime||0);workerStats.set(w.id,ws);});});
+  const presentRate=totalRows?Math.round((totalPresent/totalRows)*100):0;
+  const rpe=document.getElementById("reportPresentRate");if(rpe)rpe.textContent=presentRate+"%";
+  const roe=document.getElementById("reportOTHours");if(roe)roe.textContent=totalOT.toFixed(1);
+  const deptTable=document.getElementById("departmentReportTable");
+  if(deptTable){
+    const deptNames=[...new Set(workers.filter(w=>w.active).map(w=>w.department))].sort();
+    deptTable.innerHTML=deptNames.map(dept=>{const stats=deptStats.get(dept)||{workers:0,present:0,absent:0,ot:0};const workerCount=workers.filter(w=>w.active&&w.department===dept).length;const totalDays=stats.present+stats.absent;const rate=totalDays?Math.round((stats.present/totalDays)*100):0;return `<tr><td>${esc(dept)}</td><td>${workerCount}</td><td>${stats.present}</td><td>${stats.absent}</td><td>${stats.ot}</td><td>${rate}%</td></tr>`;}).join("")||'<tr><td colspan="6"><div class="empty">No attendance data for this period.</div></td></tr>';
+  }
+  const search=(document.getElementById("workerReportSearch")?.value||"").toLowerCase().trim();
+  const deptFilter=document.getElementById("workerReportDepartment")?.value||"all";
+  const filteredWorkers=workers.filter(w=>w.active).filter(w=>!search||[w.name,w.employeeNo,w.idNumber,w.department].some(v=>String(v||"").toLowerCase().includes(search))).filter(w=>deptFilter==="all"||w.department===deptFilter);
+  const workerTable=document.getElementById("workerReportTable");
+  if(workerTable){workerTable.innerHTML=filteredWorkers.map(w=>{const ws=workerStats.get(w.id)||{present:0,absent:0,pending:0,ot:0};const total=ws.present+ws.absent+ws.pending;const rate=total?Math.round((ws.present/total)*100):0;return `<tr><td>${esc(w.name)}</td><td>${esc(w.employeeNo)}</td><td>${w.department}</td><td>${ws.present}</td><td>${ws.absent}</td><td>${ws.pending}</td><td>${ws.ot}</td><td>${rate}%</td></tr>`;}).join("")||'<tr><td colspan="7"><div class="empty">No worker data for this period.</div></td></tr>';}
+  const table=document.getElementById("approvedHistoryTable");
+  if(table){table.innerHTML=relevantDates.length?relevantDates.map(date=>{const day=attendance[date];const records=Object.values(day?.records||{}).filter(r=>r&&['worked','present','absent'].includes(r.status));const attended=records.filter(r=>r.status==='worked'||r.status==='present').length;const batches=[...new Set(Object.values(day?.records||{}).map(r=>r&&r.batchName).filter(Boolean))];const totalOt=records.reduce((sum,r)=>sum+Number(r.overtime||0),0);const approvedBy=Object.values(day?.records||{}).find(r=>r&&r.submittedByName)?.submittedByName||'Supervisor';return `<tr><td>${esc(date)}</td><td>${batches.length?batches.map(b=>esc(b)).join(', '):'—'}</td><td>${attended}</td><td>${records.length}</td><td>${totalOt}</td><td>${esc(approvedBy)}</td><td><button class="secondary" onclick="exportApprovedAttendance('${date}')">Export</button></td></tr>`;}).join(''):'<tr><td colspan="7"><div class="empty">No approved attendance history yet.</div></td></tr>';}
+}
+
 /* ---------- reports ---------- */
 function renderReports(){
  const rw=document.getElementById("reportWorkers");if(rw)rw.textContent=workers.filter(w=>w.active).length;
@@ -1107,6 +1142,7 @@ function calculateFairShareAttendance(){
 
 // Add to window for easy access from console
 window.calculateFairShareAttendance = calculateFairShareAttendance;
+function exportPayrollReport(){const start=document.getElementById('reportStartDate')?.value||'0000-01-01',end=document.getElementById('reportEndDate')?.value||'9999-12-31';const relevantDates=Object.keys(attendance).filter(date=>date>=start&&date<=end&&attendance[date]?.approved).sort();const reportRows=[];relevantDates.forEach(date=>{const day=attendance[date];workers.filter(w=>w.active).forEach(w=>{const r=day.records?.[w.id];if(!r)return;const status=r.status||'pending';reportRows.push({date,employeeNo:w.employeeNo,name:w.name,department:w.department,classification:w.classification,batchName:r.batchName||'Default',status,regular:status==='worked'||status==='present'?1:0,overtime:Number(r.overtime||0)});});});const grouped=reportRows.reduce((acc,row)=>{if(!acc[row.date])acc[row.date]=[];acc[row.date].push(row);return acc;},{});const exportRows=[["Date","Employee No.","Worker","Department","Classification","Batch","Status","Hours","OT Hours","Verification"]];Object.entries(grouped).forEach(([date,rows])=>{rows.forEach(r=>exportRows.push([date,r.employeeNo,r.name,r.department,r.classification,r.batchName,r.status,r.overtime,r.overtime,""]));});const totalWorkers=new Set(exportRows.slice(1).map(r=>r[1])).size;const totalHours=exportRows.slice(1).reduce((sum,r)=>sum+Number(r[7]||0),0);const totalOT=exportRows.slice(1).reduce((sum,r)=>sum+Number(r[8]||0),0);exportRows.push(["TOTAL",totalWorkers,"","","","",totalHours.toString(),totalOT.toString(),"",""]);downloadCSV('payroll-report-'+start+'-to-'+end+'.csv',exportRows);showToast('Payroll report exported for '+start+' to '+end+'. Total workers: '+totalWorkers+', Total hours: '+totalHours+', Total OT: '+totalOT+'.');}
 function exportPayroll(){const rows=[["Worker","Days Worked","Daily Rate","Regular Pay","OT Hours","OT Pay","Gross"]];document.querySelectorAll("#payrollTable tr").forEach(row=>{const cells=[...row.querySelectorAll("td")].map(c=>c.innerText.trim());if(cells.length)rows.push(cells)});downloadCSV("payroll.csv",rows);showToast("Payroll CSV exported.")}
 
 /* ---------- pager rerender registry ---------- */
