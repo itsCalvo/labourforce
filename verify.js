@@ -169,7 +169,26 @@
   window.vfSwitchDayTab = function () {};
   window.vfOpenChangePin = function () { var modal = el('vfPinModal'); if (modal) modal.classList.add('show'); };
   window.vfCloseChangePin = function () { var modal = el('vfPinModal'); if (modal) modal.classList.remove('show'); };
-  window.vfSavePin = function () { var msg = el('vfPinModalMsg'); if (msg) { msg.className = 'vf-modal-msg error'; msg.textContent = 'Password changes are temporarily unavailable. Please contact an administrator.'; } };
+  window.vfSavePin = function () {
+    var msg = el('vfPinModalMsg');
+    var oldPin = (el('vfOldPin') || {}).value || '';
+    var newPin = (el('vfNewPin') || {}).value || '';
+    var confirmPin = (el('vfConfirmPin') || {}).value || '';
+    if (msg) { msg.className = 'vf-modal-msg'; msg.textContent = ''; }
+    if (!worker || !sessionToken) { if (msg) { msg.className = 'vf-modal-msg error'; msg.textContent = 'Please sign in again first.'; } return; }
+    if (!oldPin || !newPin || !confirmPin) { if (msg) { msg.className = 'vf-modal-msg error'; msg.textContent = 'Fill in all three password fields.'; } return; }
+    if (newPin.length < 4) { if (msg) { msg.className = 'vf-modal-msg error'; msg.textContent = 'New password must be at least 4 characters.'; } return; }
+    if (newPin !== confirmPin) { if (msg) { msg.className = 'vf-modal-msg error'; msg.textContent = 'New passwords do not match.'; } return; }
+    if (msg) { msg.className = 'vf-modal-msg'; msg.textContent = 'Saving...'; }
+    invoke('worker-update-pin', { worker_id: worker.worker_id, session_token: sessionToken, old_pin: oldPin, new_pin: newPin, confirm_pin: confirmPin }, 12000)
+      .then(function () {
+        if (msg) { msg.className = 'vf-modal-msg success'; msg.textContent = 'Password updated.'; }
+        if (el('vfOldPin')) el('vfOldPin').value = '';
+        if (el('vfNewPin')) el('vfNewPin').value = '';
+        if (el('vfConfirmPin')) el('vfConfirmPin').value = '';
+      })
+      .catch(function (error) { if (msg) { msg.className = 'vf-modal-msg error'; msg.textContent = error.message || 'Password change failed.'; } });
+  };
 
   document.addEventListener('DOMContentLoaded', function () {
     client = typeof supabase !== 'undefined' ? supabase.createClient(LABOUR_FORCE_SUPABASE_URL, LABOUR_FORCE_SUPABASE_ANON_KEY) : null;

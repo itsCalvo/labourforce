@@ -634,7 +634,13 @@
   function supMergeLocalDraft() {
     try {
       var lastDate = localStorage.getItem('supDraft:lastDate');
-      if (!lastDate || lastDate !== supDate()) return;
+      if (!lastDate || lastDate !== supDate()) {
+        if (!activeBatch || !supBatches[activeBatch]) {
+          var fallbackKeys = Object.keys(supBatches);
+          activeBatch = fallbackKeys[0] || '';
+        }
+        return;
+      }
       var raw = localStorage.getItem('supDraft:' + lastDate);
       if (!raw) return;
       var parsed = JSON.parse(raw);

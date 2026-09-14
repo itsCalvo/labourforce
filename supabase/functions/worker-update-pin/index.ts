@@ -39,7 +39,7 @@ async function hashPin(pin: string, salt: string): Promise<string> {
     .map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-function buildHash(pin: string): string {
+async function buildHash(pin: string): Promise<string> {
   const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
   const salt = Array.from(crypto.getRandomValues(new Uint8Array(16)))
     .map(b => chars[b % chars.length]).join('')

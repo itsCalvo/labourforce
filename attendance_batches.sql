@@ -7,9 +7,12 @@
 ALTER TABLE public.attendance
   ADD COLUMN IF NOT EXISTS batch_name text NOT NULL DEFAULT 'Default';
 
--- 2) Drop the old 2-col unique constraint if it exists, so the new
---    3-col constraint (worker_id, attendance_date, batch_name) can take over.
+-- 2) Drop the old 2-col unique constraint AND unique index if they exist, so the
+--    new 3-col constraint (worker_id, attendance_date, batch_name) can take over.
 --    This lets the same worker appear in multiple batches on the same day.
+--    Note: casualpay_attendance.sql creates attendance_worker_date_unique as an
+--    INDEX (not a constraint), so pg_constraint alone is not enough.
+DROP INDEX IF EXISTS public.attendance_worker_date_unique;
 DO $$
 DECLARE
   cname text;
@@ -19,6 +22,7 @@ BEGIN
     WHERE conrelid = 'public.attendance'::regclass
       AND contype = 'u'
       AND pg_get_constraintdef(oid) LIKE '%(worker_id, attendance_date)%'
+      AND pg_get_constraintdef(oid) NOT LIKE '%batch_name%'
   LOOP
     EXECUTE format('ALTER TABLE public.attendance DROP CONSTRAINT IF EXISTS %I', cname);
     RAISE NOTICE 'Dropped unique constraint % on attendance', cname;
